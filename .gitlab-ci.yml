@@ -1,0 +1,200 @@
+# =====================================================================
+#  Pipeline GitLab CI - alternative au workflow GitHub Actions
+#  Publie sur le registry GitLab (gitlab.com/...registry) ou Docker Hub
+#  - Multi-arch via buildx + QEMU
+#  - SBOM Syft, scan Trivy, signature cosign keyless via OIDC GitLab
+# =====================================================================
+
+stages:
+  - lint
+  - build
+  - sign
+  - scan
+  - release
+
+variables:
+  DOCKER_BUILDKIT: "1"
+  REGISTRY: $CI_REGISTRY                # GitLab registry par défaut
+  IMAGE_NAMESPACE: $CI_PROJECT_PATH
+  COSIGN_EXPERIMENTAL: "1"
+
+default:
+  image: docker:27
+  services:
+    - docker:27-dind
+  before_script:
+    - docker info >/dev/null
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+
+workflow:
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+# ---------- LINT ----------------------------------------------------
+hadolint:
+  stage: lint
+  image: hadolint/hadolint:latest-alpine
+  before_script: []
+  services: []
+  script:
+    - hadolint squid/Dockerfile
+    - hadolint c-icap/Dockerfile
+    - hadolint clamav/Dockerfile
+
+shellcheck:
+  stage: lint
+  image: koalaman/shellcheck-alpine:stable
+  before_script: []
+  services: []
+  script:
+    - shellcheck scripts/*.sh squid/entrypoint.sh c-icap/entrypoint.sh clamav/entrypoint.sh
+
+# ---------- BUILD (matrix-like via parallel:matrix) -----------------
+.build-template: &build-template
+  stage: build
+  variables:
+    PLATFORMS: "linux/amd64,linux/arm64"
+  script:
+    - apk add --no-cache git
+    - docker run --privileged --rm tonistiigi/binfmt --install all
+    - docker buildx create --use --name builder
+    # Calcul du tag
+    - |
+      if [ -n "$CI_COMMIT_TAG" ]; then
+        TAG="$CI_COMMIT_TAG"
+        EXTRA_TAGS="-t ${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:latest"
+      else
+        TAG="${CI_COMMIT_SHORT_SHA}"
+        EXTRA_TAGS="-t ${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:latest"
+      fi
+    - |
+      docker buildx build \
+        --platform "${PLATFORMS}" \
+        --provenance=mode=max \
+        --sbom=true \
+        --label "org.opencontainers.image.source=${CI_PROJECT_URL}" \
+        --label "org.opencontainers.image.revision=${CI_COMMIT_SHA}" \
+        --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --cache-from type=registry,ref=${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:buildcache \
+        --cache-to   type=registry,ref=${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:buildcache,mode=max \
+        -t ${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:${TAG} \
+        ${EXTRA_TAGS} \
+        --push \
+        ./${BUILD_CONTEXT}
+    - docker buildx imagetools inspect ${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:${TAG} | tee image-digest-${IMAGE_NAME}.txt
+  artifacts:
+    paths:
+      - image-digest-*.txt
+    expire_in: 30 days
+
+build:squid:
+  <<: *build-template
+  variables:
+    IMAGE_NAME: squid-hardened
+    BUILD_CONTEXT: squid
+
+build:c-icap:
+  <<: *build-template
+  variables:
+    IMAGE_NAME: c-icap-hardened
+    BUILD_CONTEXT: c-icap
+
+build:clamav:
+  <<: *build-template
+  variables:
+    IMAGE_NAME: clamav-hardened
+    BUILD_CONTEXT: clamav
+
+# ---------- SIGN (cosign keyless via OIDC GitLab) -------------------
+.sign-template: &sign-template
+  stage: sign
+  image: gcr.io/projectsigstore/cosign:latest
+  before_script: []
+  services: []
+  id_tokens:
+    SIGSTORE_ID_TOKEN:
+      aud: sigstore
+  script:
+    - DIGEST=$(grep -o 'sha256:[a-f0-9]*' image-digest-${IMAGE_NAME}.txt | head -1)
+    - cosign sign --yes ${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}@${DIGEST}
+
+sign:squid:
+  <<: *sign-template
+  needs: ["build:squid"]
+  variables:
+    IMAGE_NAME: squid-hardened
+
+sign:c-icap:
+  <<: *sign-template
+  needs: ["build:c-icap"]
+  variables:
+    IMAGE_NAME: c-icap-hardened
+
+sign:clamav:
+  <<: *sign-template
+  needs: ["build:clamav"]
+  variables:
+    IMAGE_NAME: clamav-hardened
+
+# ---------- SCAN ----------------------------------------------------
+.scan-template: &scan-template
+  stage: scan
+  image: aquasec/trivy:latest
+  before_script: []
+  services: []
+  script:
+    - trivy image --severity HIGH,CRITICAL --ignore-unfixed
+        --format sarif --output trivy-${IMAGE_NAME}.sarif
+        ${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:latest
+    - trivy image --severity HIGH,CRITICAL --ignore-unfixed
+        ${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:latest
+  artifacts:
+    paths:
+      - trivy-*.sarif
+    reports:
+      sast: trivy-${IMAGE_NAME}.sarif
+    expire_in: 90 days
+  allow_failure: true
+
+scan:squid:
+  <<: *scan-template
+  needs: ["build:squid"]
+  variables:
+    IMAGE_NAME: squid-hardened
+
+scan:c-icap:
+  <<: *scan-template
+  needs: ["build:c-icap"]
+  variables:
+    IMAGE_NAME: c-icap-hardened
+
+scan:clamav:
+  <<: *scan-template
+  needs: ["build:clamav"]
+  variables:
+    IMAGE_NAME: clamav-hardened
+
+# ---------- RELEASE (sur tag) ---------------------------------------
+release:tarball:
+  stage: release
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+  image: alpine:3.20
+  before_script: []
+  services: []
+  script:
+    - apk add --no-cache tar gzip coreutils
+    - mkdir -p dist
+    - tar --exclude='.git' --exclude='dist' --exclude='certs/bump.*'
+          --exclude='certs/dhparam*' --exclude='sbom' --exclude='.env'
+          --transform "s,^,squid-stack-${CI_COMMIT_TAG}/,"
+          -czf dist/squid-stack-${CI_COMMIT_TAG}.tar.gz .
+    - cd dist && sha256sum squid-stack-${CI_COMMIT_TAG}.tar.gz > squid-stack-${CI_COMMIT_TAG}.tar.gz.sha256
+  artifacts:
+    paths:
+      - dist/
+    expire_in: never

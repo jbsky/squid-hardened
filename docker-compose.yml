@@ -1,0 +1,217 @@
+# =====================================================================
+#  Stack Squid + C-ICAP + ClamAV – Hardened
+#  Trois profils :
+#    docker compose --profile transparent up -d   → mode transparent seul
+#    docker compose --profile explicit    up -d   → mode HTTPS+SSL bump seul
+#    docker compose --profile multimode   up -d   → 3 modes simultanes (VyOS-like)
+#  Les services c-icap et clamav sont communs.
+# =====================================================================
+
+# Recommandé : Docker ≥ 24 et Compose v2
+
+x-common-security: &common-security
+  # Durcissement Docker (Docker Hardened Image runtime)
+  read_only: false        # Squid a besoin d'écrire dans /var/spool/squid
+  security_opt:
+    - no-new-privileges:true
+    - seccomp=unconfined  # Adapter à un profil seccomp custom en prod
+  cap_drop:
+    - ALL
+  ulimits:
+    nofile:
+      soft: 65536
+      hard: 65536
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: "50m"
+      max-file: "5"
+
+services:
+
+  clamav:
+    <<: *common-security
+    build:
+      context: ./clamav
+      dockerfile: Dockerfile
+    image: docker.io/jbsky/clamav-hardened:latest
+    container_name: clamav
+    hostname: clamav
+    networks:
+      proxy_net:
+        aliases: [clamav]
+    volumes:
+      - clamav_db:/var/lib/clamav
+      - clamav_log:/var/log/clamav
+    tmpfs:
+      - /tmp:size=512m,mode=1777,nodev,nosuid,noexec
+      - /run/clamav:size=16m,mode=0750,uid=4000,gid=4000
+    # ClamAV a besoin de quelques capabilités pour scan (aucune root)
+    cap_add: []
+    expose: ["3310"]
+    healthcheck:
+      test: ["CMD","sh","-c","echo PING | nc -w 2 127.0.0.1 3310 | grep -q PONG"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 180s
+
+  c-icap:
+    <<: *common-security
+    build:
+      context: ./c-icap
+      dockerfile: Dockerfile
+    image: docker.io/jbsky/c-icap-hardened:latest
+    container_name: c-icap
+    hostname: c-icap
+    depends_on:
+      clamav:
+        condition: service_healthy
+    networks:
+      proxy_net:
+        aliases: [c-icap]
+    volumes:
+      - cicap_log:/var/log/c-icap
+    tmpfs:
+      - /tmp:size=512m,mode=1777,nodev,nosuid,noexec
+      - /run/c-icap:size=16m,mode=0750,uid=4100,gid=4100
+    environment:
+      CLAMD_HOST: clamav
+      CLAMD_PORT: "3310"
+    expose: ["1344"]
+
+  # ------------------ MODE TRANSPARENT ------------------------------
+  squid-transparent:
+    <<: *common-security
+    profiles: ["transparent","all"]
+    build:
+      context: ./squid
+      dockerfile: Dockerfile
+    image: docker.io/jbsky/squid-hardened:latest
+    container_name: squid-transparent
+    hostname: squid-transparent
+    depends_on:
+      c-icap:
+        condition: service_started
+    # En mode transparent, on a besoin de NET_ADMIN + NET_RAW pour bind sur le
+    # port intercepté ET pour récupérer la destination originale via TPROXY/REDIRECT.
+    cap_add:
+      - NET_BIND_SERVICE
+      - NET_ADMIN
+      - NET_RAW
+    networks:
+      proxy_net:
+        aliases: [squid-transparent]
+    # On expose en mode host network sur l'hôte VyOS ? Non, VyOS fera du DNAT
+    # vers ce port. On binde donc explicitement.
+    ports:
+      - "3128:3128/tcp"   # intercepté par VyOS REDIRECT
+      - "3127:3127/tcp"   # admin/cachemgr
+    volumes:
+      - ./squid/squid-transparent.conf:/etc/squid/squid.conf:ro
+      - ./squid/nobump_domains.acl:/etc/squid/conf.d/nobump_domains.acl:ro
+      - squid_tx_spool:/var/spool/squid
+      - squid_tx_log:/var/log/squid
+    tmpfs:
+      - /tmp:size=256m,mode=1777,nodev,nosuid,noexec
+      - /run:size=16m,mode=0755,uid=3128,gid=3128
+
+  # ------------------ MODE EXPLICITE + SSL BUMP ---------------------
+  squid-explicit:
+    <<: *common-security
+    profiles: ["explicit","all"]
+    build:
+      context: ./squid
+      dockerfile: Dockerfile
+    image: docker.io/jbsky/squid-hardened:latest
+    container_name: squid-explicit
+    hostname: squid-explicit
+    depends_on:
+      c-icap:
+        condition: service_started
+    cap_add:
+      - NET_BIND_SERVICE
+    networks:
+      proxy_net:
+        aliases: [squid-explicit]
+    ports:
+      - "3128:3128/tcp"   # port explicite (HTTP CONNECT)
+      - "3129:3129/tcp"   # port SSL bump
+    volumes:
+      - ./squid/squid-explicit.conf:/etc/squid/squid.conf:ro
+      - ./squid/nobump_domains.acl:/etc/squid/conf.d/nobump_domains.acl:ro
+      - ./certs:/etc/squid/ssl_cert:ro
+      - squid_ex_spool:/var/spool/squid
+      - squid_ex_ssldb:/var/lib/ssl_db
+      - squid_ex_log:/var/log/squid
+    tmpfs:
+      - /tmp:size=256m,mode=1777,nodev,nosuid,noexec
+      - /run:size=16m,mode=0755,uid=3128,gid=3128
+
+  # ------------------ MODE MULTI (2 ports simultanes) ----------------
+  # Equivalent de la conf VyOS : explicit + SSL bump
+  # NOTE: transparent intercept (port 3129) non supporte en container
+  # bridge (getsockopt(SO_ORIGINAL_DST) echoue cross-namespace).
+  squid-multimode:
+    <<: *common-security
+    profiles: ["multimode","all"]
+    build:
+      context: ./squid
+      dockerfile: Dockerfile
+    image: docker.io/jbsky/squid-hardened:latest
+    container_name: squid-multimode
+    hostname: squid-multimode
+    depends_on:
+      c-icap:
+        condition: service_started
+    cap_add:
+      - NET_BIND_SERVICE
+    networks:
+      proxy_net:
+        aliases: [squid-multimode]
+    ports:
+      - "3128:3128/tcp"   # explicit proxy
+      - "3130:3130/tcp"   # SSL bump explicit
+    volumes:
+      - ./squid/squid-vyos.conf:/etc/squid/squid.conf:ro
+      - ./squid/nobump_domains.acl:/etc/squid/conf.d/nobump_domains.acl:ro
+      - ./certs:/etc/squid/ssl_cert:ro
+      - squid_mm_spool:/var/spool/squid
+      - squid_mm_ssldb:/var/lib/ssl_db
+      - squid_mm_log:/var/log/squid
+    tmpfs:
+      - /tmp:size=256m,mode=1777,nodev,nosuid,noexec
+      - /run:size=16m,mode=0755,uid=3128,gid=3128
+
+networks:
+  proxy_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
+    driver_opts:
+      com.docker.network.bridge.name: br-proxy
+
+volumes:
+  clamav_db:       { driver: local }
+  clamav_log:      { driver: local }
+  cicap_log:       { driver: local }
+  squid_tx_spool:  { driver: local }
+  squid_tx_log:    { driver: local }
+  squid_ex_spool:  { driver: local }
+  squid_ex_ssldb:  { driver: local }
+  squid_ex_log:    { driver: local }
+  squid_mm_spool:  { driver: local }
+  squid_mm_ssldb:  { driver: local }
+  squid_mm_log:    { driver: local }
+
+# =====================================================================
+#  docker-compose.dhi.yml  (à utiliser via -f si tu as dhi.io auth)
+#  Surcharge le docker-compose.yml pour utiliser les YAML DHI au lieu
+#  des Dockerfiles classiques. Nécessite docker login dhi.io.
+#
+#  Usage :
+#    docker compose -f docker-compose.yml -f docker-compose.dhi.yml \
+#      --profile explicit up -d
+# =====================================================================

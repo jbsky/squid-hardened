@@ -1,0 +1,35 @@
+# =====================================================================
+#  docker-compose.dhi.yml – Override DHI
+#  Remplace les Dockerfiles classiques par les définitions DHI YAML.
+#  Nécessite : docker login dhi.io (compte Docker Hub avec accès DHI)
+#
+#  Usage :
+#    docker compose -f docker-compose.yml -f docker-compose.dhi.yml \
+#      --profile explicit up --build -d
+#
+#  Ou depuis le registry (si CI a déjà poussé les images) :
+#    docker compose -f docker-compose.yml -f docker-compose.dhi.yml \
+#      --profile explicit up -d
+#    (les services pull ghcr.io directement)
+# =====================================================================
+
+services:
+  clamav:
+    build:
+      context: ./clamav
+      dockerfile: clamav.yaml          # ← DHI YAML (frontend dhi.io/build:2-alpine3.23)
+
+  c-icap:
+    build:
+      context: ./c-icap
+      dockerfile: c-icap.yaml
+
+  squid-transparent:
+    build:
+      context: ./squid
+      dockerfile: squid.yaml
+
+  squid-explicit:
+    build:
+      context: ./squid
+      dockerfile: squid.yaml

@@ -1,0 +1,200 @@
+# syntax=dhi.io/build:2-alpine3.23
+# =====================================================================
+#  Squid – Docker Hardened Image
+#  Utilise le paquet Alpine community (squid ≥ 6.x) qui est déjà compilé
+#  avec --enable-ssl-crtd, --enable-icap-client, --enable-linux-netfilter.
+#  Pas besoin de compiler depuis les sources → builds stage minimal.
+#
+#  Build :
+#    docker buildx build . -f squid/squid.yaml \
+#      --sbom=generator=dhi.io/scout-sbom-indexer:1 \
+#      --provenance=1 \
+#      --tag ghcr.io/jbsky/squid-hardened:latest --push
+# =====================================================================
+
+name: Squid hardened
+image: docker.io/jbsky/squid-hardened
+variant: runtime
+tags:
+  - "6"
+  - "6.10"
+platforms:
+  - linux/amd64
+  - linux/arm64
+
+contents:
+  repositories:
+    - http://dl-cdn.alpinelinux.org/alpine/v3.23/main
+    - http://dl-cdn.alpinelinux.org/alpine/v3.23/community
+  packages:
+    - squid
+    - openssl
+    - ca-certificates-bundle
+    - libcap
+    - krb5-libs
+    - libxml2
+    - tini
+    - tzdata
+    - musl
+
+  builds:
+    - name: squid-setup
+      contents:
+        repositories:
+          - http://dl-cdn.alpinelinux.org/alpine/v3.23/main
+          - http://dl-cdn.alpinelinux.org/alpine/v3.23/community
+        packages:
+          - squid
+          - openssl
+      pipeline:
+        - name: directories
+          runs: |
+            set -eux -o pipefail
+            # Répertoires runtime
+            install -d -m 0755 /var/log/squid
+            install -d -m 0755 /var/spool/squid
+            install -d -m 0750 /var/lib/ssl_db
+            install -d -m 0755 /etc/squid/ssl_cert
+            install -d -m 0755 /etc/squid/conf.d
+            install -d -m 0755 /run
+            # ssl_db initialisée à l'entrypoint (vol writable requis)
+            touch /var/lib/ssl_db/.keep
+        - name: strip-binaries
+          runs: |
+            set -eux
+            strip /usr/sbin/squid 2>/dev/null || true
+            find /usr/lib/squid -type f -name '*.so*' -exec sh -c \
+              'file "$1" | grep -q ELF && strip "$1"' _ {} \; 2>/dev/null || true
+      outputs:
+        - source: /var/log/squid
+          target: /var/log/squid
+          uid: 3128
+          gid: 3128
+        - source: /var/spool/squid
+          target: /var/spool/squid
+          uid: 3128
+          gid: 3128
+        - source: /var/lib/ssl_db
+          target: /var/lib/ssl_db
+          uid: 3128
+          gid: 3128
+        - source: /etc/squid
+          target: /etc/squid
+          uid: 0
+          gid: 3128
+        - source: /run
+          target: /run
+          uid: 3128
+          gid: 3128
+
+  files:
+    # Entrypoint inline – init ssl_db + cache + parse-check + lancement
+    - path: /usr/local/bin/entrypoint.sh
+      uid: 0
+      gid: 0
+      mode: "0755"
+      content: |
+        #!/bin/sh
+        set -eu
+        SSL_DB="/var/lib/ssl_db"
+        CONF="${SQUID_CONF:-/etc/squid/squid.conf}"
+
+        if [ ! -f "${SSL_DB}/index.txt" ] && grep -qE 'ssl_bump|sslcrtd' "${CONF}" 2>/dev/null; then
+            echo "[entrypoint] Init DB SSL certgen dans ${SSL_DB}"
+            /usr/lib/squid/security_file_certgen -c -s "${SSL_DB}" -M 20MB
+        fi
+
+        if [ ! -d "/var/spool/squid/00" ] && grep -qE '^cache_dir' "${CONF}" 2>/dev/null; then
+            echo "[entrypoint] Init cache Squid"
+            squid -N -z -f "${CONF}" || true
+        fi
+
+        if grep -q 'ssl_bump\|sslcrtd' "${CONF}" 2>/dev/null; then
+            if [ ! -f /etc/squid/ssl_cert/bump.pem ]; then
+                echo "[entrypoint][WARN] SSL Bump activé mais bump.pem absent."
+            fi
+        fi
+
+        echo "[entrypoint] Parse-check configuration..."
+        squid -k parse -f "${CONF}"
+
+        echo "[entrypoint] Démarrage Squid"
+        exec "$@"
+
+    # ACL nobump inline (surchargeable par volume mount)
+    - path: /etc/squid/conf.d/nobump_domains.acl
+      uid: 0
+      gid: 3128
+      mode: "0640"
+      content: |
+        # Domaines exclus du SSL Bump (splice = pass-through)
+        # Surcharger ce fichier via volume mount si nécessaire
+        \.banquepopulaire\.fr$
+        \.creditagricole\.fr$
+        \.impots\.gouv\.fr$
+        \.service-public\.fr$
+        \.ameli\.fr$
+        \.apple\.com$
+        \.windowsupdate\.com$
+        \.update\.microsoft\.com$
+        \.zoom\.us$
+        \.teams\.microsoft\.com$
+
+accounts:
+  run-as: squid
+  users:
+    - name: squid
+      uid: 3128
+      gid: 3128
+  groups:
+    - name: squid
+      gid: 3128
+      members:
+        - squid
+
+paths:
+  - type: directory
+    path: /etc/squid/ssl_cert
+    uid: 0
+    gid: 3128
+    mode: "0750"
+
+environment:
+  TZ: UTC
+  SQUID_CONF: /etc/squid/squid.conf
+
+entrypoint:
+  - /sbin/tini
+  - "--"
+  - /usr/local/bin/entrypoint.sh
+
+cmd:
+  - squid
+  - -N
+  - -d
+  - "1"
+  - -f
+  - /etc/squid/squid.conf
+
+# Les deux ports exposés (3128 HTTP/intercept, 3129 SSL Bump)
+ports:
+  - 3128/tcp
+  - 3129/tcp
+
+volumes:
+  - /var/spool/squid
+  - /var/log/squid
+  - /var/lib/ssl_db
+  - /etc/squid/ssl_cert
+
+os-release:
+  name: Docker Hardened Images (Alpine)
+  id: alpine
+  version-id: "3.23"
+  pretty-name: Squid Hardened / Alpine Linux v3.23
+  home-url: https://docker.com/products/hardened-images/
+  bug-report-url: https://github.com/jbsky/stack-squid/issues
+
+annotations:
+  org.opencontainers.image.description: Squid 6 avec SSL Bump + ICAP, DHI hardened, non-root
+  org.opencontainers.image.licenses: GPL-2.0-or-later

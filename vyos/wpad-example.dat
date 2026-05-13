@@ -1,0 +1,27 @@
+// =====================================================================
+//  wpad.dat – Auto-configuration du proxy pour les clients
+//  À servir via HTTP en : http://wpad.lan.local/wpad.dat
+//  Distribué via DHCP option 252 (cf vyos-explicit.config)
+//  Aussi accessible en /proxy.pac pour configuration manuelle.
+// =====================================================================
+
+function FindProxyForURL(url, host)
+{
+    // Hôtes locaux : pas de proxy
+    if (isPlainHostName(host) ||
+        shExpMatch(host, "*.lan.local") ||
+        shExpMatch(host, "*.internal") ||
+        isInNet(dnsResolve(host), "10.0.0.0",   "255.0.0.0")   ||
+        isInNet(dnsResolve(host), "172.16.0.0", "255.240.0.0") ||
+        isInNet(dnsResolve(host), "192.168.0.0","255.255.0.0")) {
+        return "DIRECT";
+    }
+
+    // HTTPS → port SSL Bump
+    if (url.substring(0, 6) == "https:") {
+        return "PROXY proxy.lan.local:3129; DIRECT";
+    }
+
+    // HTTP standard
+    return "PROXY proxy.lan.local:3128; DIRECT";
+}
