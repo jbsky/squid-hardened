@@ -64,6 +64,12 @@ RUN find /out -type f \( -name '*.so*' -o -perm -111 \) -exec sh -c 'file "$1" 2
 RUN rm -rf /out/var/run \
  && install -d -m 0755 /out/var/log/c-icap /out/run/c-icap
 
+# ---------- Stage 1b : Go builder (entrypoint + healthcheck) ---------
+FROM golang:1.22-alpine AS gobuilder
+WORKDIR /build
+COPY go.mod init.go ./
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags='-s -w' -o /init .
+
 # ---------- Stage 2 : runtime ----------------------------------------
 FROM alpine:${ALPINE_VERSION} AS runtime
 
@@ -88,31 +94,24 @@ COPY --from=builder /out/ /
 
 COPY c-icap.conf       /etc/c-icap/c-icap.conf
 COPY squidclamav.conf  /etc/c-icap/squidclamav.conf
-COPY entrypoint.sh     /usr/local/bin/entrypoint.sh
+
+# Go init binary (entrypoint + healthcheck, static, no shell needed)
+COPY --from=gobuilder /init /usr/local/bin/init
 
 RUN chown -R cicap:cicap /var/log/c-icap /run/c-icap \
  && chown root:cicap     /etc/c-icap/*.conf \
- && chmod 0640           /etc/c-icap/*.conf \
- && chmod 0755           /usr/local/bin/entrypoint.sh
+ && chmod 0640           /etc/c-icap/*.conf
 
-# ── Runtime hardening: strip attack surface ──────────────────────────
-# Remove package manager + curl CLI (squidclamav needs libcurl only)
-# Busybox stripped to: sh (entrypoint), echo/printf (logging),
-#   nc/head/grep (healthcheck + clamd check), sleep (retry loop)
-RUN rm -rf /sbin/apk /etc/apk /lib/apk /var/cache/apk \
- && KEEP="sh echo printf grep head nc sleep" \
- && for f in $(busybox --list-full); do \
-      name=${f##*/}; \
-      case " $KEEP " in *" $name "*) ;; *) /bin/busybox rm -f "/$f";; esac; \
-    done \
- && /bin/busybox rm -f /usr/bin/bz*
+# ── Runtime hardening: remove shell + package manager entirely ───────
+RUN for f in $(/bin/busybox --list-full); do /bin/busybox rm -f "/$f"; done; \
+    /bin/busybox rm -rf /bin/busybox /sbin/apk /etc/apk /lib/apk /var/cache/apk /usr/bin/bz*
 
 USER cicap:cicap
 
 EXPOSE 1344/tcp
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD /bin/sh -c 'printf "OPTIONS icap://localhost/squidclamav ICAP/1.0\r\nHost: localhost\r\n\r\n" | nc -w 2 127.0.0.1 1344 | head -1 | grep -q "200" || exit 1'
+  CMD ["/usr/local/bin/init", "--healthcheck"]
 
-ENTRYPOINT ["/sbin/tini","--","/usr/local/bin/entrypoint.sh"]
+ENTRYPOINT ["/sbin/tini","--","/usr/local/bin/init"]
 CMD ["c-icap","-N","-D","-f","/etc/c-icap/c-icap.conf"]

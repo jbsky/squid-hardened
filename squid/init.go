@@ -1,0 +1,148 @@
+// Squid hardened init — replaces entrypoint.sh + healthcheck.
+// Static binary, zero shell dependency.
+//
+// Usage:
+//
+//	init [--healthcheck]     run Docker healthcheck (exit 0/1)
+//	init [CMD [ARGS...]]    entrypoint: SSL DB, cache, parse-check, then exec CMD
+package main
+
+import (
+	"bufio"
+	"fmt"
+	"net"
+	"os"
+	"os/exec"
+	"strings"
+	"syscall"
+	"time"
+)
+
+func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--healthcheck" {
+		os.Exit(healthcheck())
+	}
+	if err := entrypoint(); err != nil {
+		fmt.Fprintf(os.Stderr, "[init][ERROR] %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Healthcheck: GET cache_object://localhost/info → expect "200"
+// ---------------------------------------------------------------------------
+
+func healthcheck() int {
+	conn, err := net.DialTimeout("tcp", "127.0.0.1:3128", 2*time.Second)
+	if err != nil {
+		return 1
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+	fmt.Fprint(conn, "GET cache_object://localhost/info HTTP/1.0\r\n\r\n")
+	sc := bufio.NewScanner(conn)
+	if sc.Scan() && strings.Contains(sc.Text(), "200") {
+		return 0
+	}
+	return 1
+}
+
+// ---------------------------------------------------------------------------
+// Entrypoint
+// ---------------------------------------------------------------------------
+
+func entrypoint() error {
+	conf := env("SQUID_CONF", "/etc/squid/squid.conf")
+
+	// 0) mime.conf — hidden when /etc/squid is a volume mount
+	if !exists("/etc/squid/mime.conf") && exists("/usr/share/squid/mime.conf") {
+		log("mime.conf absent, lien depuis /usr/share/squid/")
+		_ = os.Symlink("/usr/share/squid/mime.conf", "/etc/squid/mime.conf")
+	}
+
+	// 1) SSL Bump init
+	confData, _ := os.ReadFile(conf)
+	confStr := string(confData)
+
+	if strings.Contains(confStr, "sslcrtd_program") || strings.Contains(confStr, "ssl_bump") {
+		sslDB := "/var/lib/ssl_db/db"
+		if !exists(sslDB + "/index.txt") {
+			log("Initialisation de la DB SSL dans %s", sslDB)
+			_ = os.RemoveAll(sslDB)
+			if err := run("/usr/lib/squid/security_file_certgen", "-c", "-s", sslDB, "-M", "20MB"); err != nil {
+				return fmt.Errorf("security_file_certgen: %w", err)
+			}
+		}
+		if !exists("/etc/squid/ssl_cert/bump.pem") {
+			warn("SSL Bump activé mais /etc/squid/ssl_cert/bump.pem absent.")
+			warn("Génère ta CA avec scripts/generate-ca.sh puis monte-la en read-only.")
+		}
+	}
+
+	// 2) Cache init (if cache_dir directive present and cache empty)
+	if lineStartsWith(confStr, "cache_dir") && !exists("/var/spool/squid/00") {
+		log("Initialisation du cache Squid")
+		_ = run("squid", "-N", "-z", "-f", conf) // best-effort
+	}
+
+	// 3) Parse-check
+	log("Parse-check de la configuration...")
+	if err := run("squid", "-k", "parse", "-f", conf); err != nil {
+		return fmt.Errorf("squid -k parse: %w", err)
+	}
+
+	// 4) Exec
+	log("Démarrage de Squid")
+	return execCmd(os.Args[1:])
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+func env(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func lineStartsWith(text, prefix string) bool {
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func run(name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func execCmd(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("no command specified")
+	}
+	bin, err := exec.LookPath(args[0])
+	if err != nil {
+		return fmt.Errorf("command not found: %s", args[0])
+	}
+	return syscall.Exec(bin, args, os.Environ())
+}
+
+func log(format string, a ...any) {
+	fmt.Printf("[init] "+format+"\n", a...)
+}
+
+func warn(format string, a ...any) {
+	fmt.Printf("[init][WARN] "+format+"\n", a...)
+}

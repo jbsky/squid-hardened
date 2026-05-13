@@ -4,8 +4,13 @@ Ce document détaille les choix de sécurité appliqués aux images de cette sta
 
 ## 1. Construction (build-time)
 
-### 1.1 Multi-stage
-Chaque image est construite en deux stages : un `builder` avec toutes les chaînes de compilation, un `runtime` minimal copiant uniquement les artefacts produits (`COPY --from=builder /out/ /`). Le builder n'est jamais publié.
+### 1.1 Multi-stage (3 stages)
+Chaque image est construite en trois stages :
+1. **builder** — chaîne de compilation complète, compilation from source
+2. **gobuilder** — `golang:1.22-alpine`, compile l'entrypoint Go statique
+3. **runtime** — Alpine minimal, copie uniquement les artefacts (`COPY --from=builder`, `COPY --from=gobuilder`)
+
+Ni le builder ni le gobuilder ne sont publiés.
 
 ### 1.2 Flags de durcissement compilateur
 Squid et c-icap sont compilés avec :
@@ -36,22 +41,28 @@ Alpine 3.20 → ~7 Mo de base, glibc-free (musl).
 ### 2.2 Package manager supprimé
 `apk` (binaire, base de données et configuration) est supprimé du stage runtime sur les 3 images (y compris ClamAV où il provient de la base Alpine). Un attaquant ne peut pas installer de paquets supplémentaires.
 
-### 2.3 Busybox réduit au minimum
-Busybox fournit toutes les commandes shell sur Alpine. Les symlinks sont supprimés sauf ceux strictement nécessaires aux entrypoints et healthchecks :
+### 2.3 Shell-free (Tier 2 — zero shell, zero busybox)
+Les 3 images sont **entièrement dépourvues de shell**. `/bin/sh`, `/bin/busybox` et tous les symlinks busybox sont supprimés du stage runtime. Un attaquant ne peut pas obtenir de shell interactif, même avec un RCE.
 
-| Image | Applets conservés |
-|-------|------------------|
-| squid | sh, echo, printf, ls, ln, rm, grep, head, nc, sleep |
-| c-icap | sh, echo, printf, grep, head, nc, sleep |
-| clamav | sh, echo, ls, nc, grep |
+Technique : le dernier `RUN` du Dockerfile fait supprimer busybox par lui-même (le processus shell en mémoire termine avant que le binaire soit effacé du filesystem). Les entrypoints et healthchecks sont des **binaires Go statiques** (`CGO_ENABLED=0`) compilés dans un stage `gobuilder` séparé.
 
-**Limitation connue** : le binaire `/bin/busybox` reste présent ; un attaquant averti peut appeler `busybox wget`, `busybox vi`, etc. La suppression complète du shell nécessite de réécrire les entrypoints en Go (voir section 10).
+Vérification :
+```bash
+docker exec <container> /bin/sh -c "echo test"
+# OCI runtime exec failed: stat /bin/sh: no such file or directory
+```
 
 ### 2.4 Pas d'outils offensifs
 Pas de `curl` (CLI), `wget`, `bash`, `python`, `gcc`, `make`, `apk` dans le runtime. Le module squidclamav lie `libcurl.so` dynamiquement mais le binaire `curl` n'est pas installé.
 
 ### 2.5 Healthchecks intégrés
-Healthchecks via `nc` (netcat busybox) + `grep` — aucune dépendance externe.
+Healthchecks via le binaire Go `/usr/local/bin/init --healthcheck` — protocoles natifs sans dépendance shell :
+
+| Image | Healthcheck |
+|-------|------------|
+| squid | HTTP GET `cache_object://localhost/info` sur :3128 → attend `200` |
+| c-icap | ICAP `OPTIONS icap://localhost/squidclamav` sur :1344 → attend `200` |
+| clamav | TCP `PING\n` sur :3310 → attend `PONG` |
 
 ### 2.6 Labels OCI
 `org.opencontainers.image.*` pour traçabilité et signature (cosign).
@@ -153,9 +164,32 @@ cosign generate-key-pair
 cosign sign --key cosign.key registry.local/squid-hardened:latest
 ```
 
-## 10. Améliorations futures
+## 10. Entrypoints Go (Tier 2)
 
-- [ ] **Entrypoints Go** : réécrire les 3 entrypoints en binaires statiques Go → suppression complète de `/bin/busybox` et `/bin/sh`
+Les 3 entrypoints sont des binaires Go statiques (`/usr/local/bin/init`) compilés sans CGO dans un stage `gobuilder` (`golang:1.22-alpine`). Chaque binaire gère à la fois l'initialisation du service et le healthcheck Docker (flag `--healthcheck`).
+
+### Architecture
+
+```
+tini (PID 1)
+  └── /usr/local/bin/init [CMD...]
+        ├── Initialisation (SSL DB, cache, freshclam, wait clamd...)
+        └── syscall.Exec(CMD) → remplace le processus par le service
+```
+
+### Fonctions par service
+
+| Service | Init | Healthcheck |
+|---------|------|-------------|
+| squid | mime.conf symlink, SSL DB init, cache init, parse-check, exec squid | HTTP 200 sur :3128 |
+| c-icap | TCP wait clamd (120s timeout), exec c-icap | ICAP OPTIONS 200 sur :1344 |
+| clamav | freshclam initial + daemon background, exec clamd | PING/PONG TCP :3310 |
+
+Sources : `squid/init.go`, `c-icap/init.go`, `clamav/init.go` (stdlib uniquement, pas de dépendances externes).
+
+## 11. Améliorations futures
+
+- [x] ~~Entrypoints Go~~ → **fait** (Tier 2, voir section 10)
 - [ ] Migrer `runtime` vers Chainguard Wolfi (`cgr.dev/chainguard/wolfi-base`) ou Distroless
 - [ ] Profil **seccomp** custom (le défaut est désactivé dans le compose pour debug)
 - [ ] Profil **AppArmor** / SELinux dédié

@@ -6,8 +6,8 @@
 #   - multi-stage
 #   - utilisateur non-root
 #   - binaires strip + RELRO + PIE + stack-protector
-#   - package manager (apk) supprimé en runtime
-#   - busybox réduit aux ~10 applets nécessaires (entrypoint + healthcheck)
+#   - package manager (apk) et shell (busybox) absents du runtime
+#   - entrypoint + healthcheck en binaire Go statique
 #   - filesystem read-only friendly
 #   - aucune capabilité root requise au runtime
 # =====================================================================
@@ -102,6 +102,12 @@ RUN rm -rf /out/var/run \
                        /out/usr/share/squid \
  && cp /out/etc/squid/mime.conf /out/usr/share/squid/mime.conf
 
+# ---------- Stage 1b : Go builder (entrypoint + healthcheck) ---------
+FROM golang:1.22-alpine AS gobuilder
+WORKDIR /build
+COPY go.mod init.go ./
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags='-s -w' -o /init .
+
 # ---------- Stage 2 : runtime hardened -------------------------------
 FROM alpine:${ALPINE_VERSION} AS runtime
 
@@ -133,36 +139,26 @@ RUN apk add --no-cache \
 # Copie depuis le builder
 COPY --from=builder /out/ /
 
+# Go init binary (entrypoint + healthcheck, static, no shell needed)
+COPY --from=gobuilder /init /usr/local/bin/init
+
 # Permissions strictes
 RUN chown -R squid:squid /var/log/squid /var/spool/squid /var/lib/ssl_db /run /etc/squid \
  && chmod 0750 /var/lib/ssl_db \
  && chmod 0755 /var/log/squid /var/spool/squid
 
-# Initialisation ssl_db (DB des certificats forgés) – fait en entrypoint si vide
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod 0755 /usr/local/bin/entrypoint.sh
-
-# ── Runtime hardening: strip attack surface ──────────────────────────
-# Remove package manager — prevents installing tools in compromised container
-# Remove unused busybox applets — reduces shell utility to bare minimum
-# Remaining: sh (entrypoint), echo/printf (logging), ln/rm (init),
-#            grep (config check), nc/head (healthcheck), ls/sleep (runtime)
-# Note: /bin/busybox binary remains; applets still invocable via
-#       "busybox <applet>" — full removal requires rewriting entrypoints in Go.
-RUN rm -rf /sbin/apk /etc/apk /lib/apk /var/cache/apk \
- && KEEP="sh echo printf ls ln rm grep head nc sleep" \
- && for f in $(busybox --list-full); do \
-      name=${f##*/}; \
-      case " $KEEP " in *" $name "*) ;; *) /bin/busybox rm -f "/$f";; esac; \
-    done
+# ── Runtime hardening: remove shell + package manager entirely ───────
+# Go static binary replaces entrypoint.sh — no /bin/sh needed at runtime.
+# busybox + apk are fully removed; the running shell deletes itself.
+RUN for f in $(/bin/busybox --list-full); do /bin/busybox rm -f "/$f"; done; \
+    /bin/busybox rm -rf /bin/busybox /sbin/apk /etc/apk /lib/apk /var/cache/apk
 
 USER squid:squid
 
 EXPOSE 3128/tcp 3130/tcp
 
-# Healthcheck via squidclient si dispo, sinon TCP
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD /bin/sh -c 'printf "GET cache_object://localhost/info HTTP/1.0\r\n\r\n" | nc -w 2 127.0.0.1 3128 | head -1 | grep -q "200" || exit 1'
+  CMD ["/usr/local/bin/init", "--healthcheck"]
 
-ENTRYPOINT ["/sbin/tini","--","/usr/local/bin/entrypoint.sh"]
+ENTRYPOINT ["/sbin/tini","--","/usr/local/bin/init"]
 CMD ["squid","-N","-d","1","-f","/etc/squid/squid.conf"]

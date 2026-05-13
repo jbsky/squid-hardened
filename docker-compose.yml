@@ -51,7 +51,7 @@ services:
     cap_add: []
     expose: ["3310"]
     healthcheck:
-      test: ["CMD","sh","-c","echo PING | nc -w 2 127.0.0.1 3310 | grep -q PONG"]
+      test: ["CMD","/usr/local/bin/init","--healthcheck"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -110,7 +110,7 @@ services:
       - "3127:3127/tcp"   # admin/cachemgr
     volumes:
       - ./squid/squid-transparent.conf:/etc/squid/squid.conf:ro
-      - ./squid/nobump_domains.acl:/etc/squid/conf.d/nobump_domains.acl:ro
+      - ./squid/conf.d:/etc/squid/conf.d:ro
       - squid_tx_spool:/var/spool/squid
       - squid_tx_log:/var/log/squid
     tmpfs:
@@ -140,7 +140,7 @@ services:
       - "3129:3129/tcp"   # port SSL bump
     volumes:
       - ./squid/squid-explicit.conf:/etc/squid/squid.conf:ro
-      - ./squid/nobump_domains.acl:/etc/squid/conf.d/nobump_domains.acl:ro
+      - ./squid/conf.d:/etc/squid/conf.d:ro
       - ./certs:/etc/squid/ssl_cert:ro
       - squid_ex_spool:/var/spool/squid
       - squid_ex_ssldb:/var/lib/ssl_db
@@ -175,7 +175,7 @@ services:
       - "3130:3130/tcp"   # SSL bump explicit
     volumes:
       - ./squid/squid-vyos.conf:/etc/squid/squid.conf:ro
-      - ./squid/nobump_domains.acl:/etc/squid/conf.d/nobump_domains.acl:ro
+      - ./squid/conf.d:/etc/squid/conf.d:ro
       - ./certs:/etc/squid/ssl_cert:ro
       - squid_mm_spool:/var/spool/squid
       - squid_mm_ssldb:/var/lib/ssl_db

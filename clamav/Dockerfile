@@ -31,6 +31,12 @@ RUN apk add --no-cache \
         /run/clamav \
  && rm -rf /var/cache/apk
 
+# ---------- Stage 1b : Go builder (entrypoint + healthcheck) ---------
+FROM golang:1.22-alpine AS gobuilder
+WORKDIR /build
+COPY go.mod init.go ./
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags='-s -w' -o /init .
+
 # ---------- Stage 2 : runtime (sans apk ni sa DB) --------------------
 FROM alpine:${ALPINE_VERSION} AS runtime
 
@@ -69,29 +75,23 @@ COPY --from=builder --chown=clamav:clamav /run/clamav     /run/clamav
 
 COPY clamd.conf      /etc/clamav/clamd.conf
 COPY freshclam.conf  /etc/clamav/freshclam.conf
-COPY entrypoint.sh   /usr/local/bin/entrypoint.sh
+
+# Go init binary (entrypoint + healthcheck, static, no shell needed)
+COPY --from=gobuilder /init /usr/local/bin/init
 
 RUN chown root:clamav /etc/clamav/clamd.conf /etc/clamav/freshclam.conf \
- && chmod 0640        /etc/clamav/clamd.conf /etc/clamav/freshclam.conf \
- && chmod 0755        /usr/local/bin/entrypoint.sh
+ && chmod 0640        /etc/clamav/clamd.conf /etc/clamav/freshclam.conf
 
-# ── Runtime hardening: strip attack surface ──────────────────────────
-# Alpine base provides busybox + apk — strip to bare minimum
-# Remaining: sh (entrypoint), echo (logging), ls (DB check),
-#            nc/grep (healthcheck)
-RUN /bin/busybox rm -rf /sbin/apk /etc/apk /lib/apk /var/cache/apk \
- && KEEP="sh echo ls nc grep" \
- && for f in $(busybox --list-full); do \
-      name=${f##*/}; \
-      case " $KEEP " in *" $name "*) ;; *) /bin/busybox rm -f "/$f";; esac; \
-    done
+# ── Runtime hardening: remove shell + package manager entirely ───────
+RUN for f in $(/bin/busybox --list-full); do /bin/busybox rm -f "/$f"; done; \
+    /bin/busybox rm -rf /bin/busybox /sbin/apk /etc/apk /lib/apk /var/cache/apk
 
 USER clamav:clamav
 
 EXPOSE 3310/tcp
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
-  CMD /bin/sh -c 'echo PING | nc -w 2 127.0.0.1 3310 | grep -q PONG'
+  CMD ["/usr/local/bin/init", "--healthcheck"]
 
-ENTRYPOINT ["/sbin/tini","--","/usr/local/bin/entrypoint.sh"]
+ENTRYPOINT ["/sbin/tini","--","/usr/local/bin/init"]
 CMD ["clamd","--foreground=true","--config-file=/etc/clamav/clamd.conf"]
