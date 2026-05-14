@@ -64,16 +64,20 @@ shellcheck:
     # (Docker 27 buildx cannot load TLS data directly from environment)
     - docker context create tls-ctx
     # Pass proxy env to BuildKit container (docker-container driver creates
-    # a separate container that doesn't inherit the build container's env)
+    # a separate container that doesn't inherit the build container's env).
+    # Quotes around --driver-opt values are critical: no_proxy contains commas
+    # that Docker would otherwise interpret as option separators.
+    # network=host gives BuildKit access to dind's /etc/hosts and DNS.
     - |
-      DRIVER_OPTS=""
-      [ -n "${http_proxy:-}" ]  && DRIVER_OPTS="$DRIVER_OPTS --driver-opt env.http_proxy=$http_proxy"
-      [ -n "${https_proxy:-}" ] && DRIVER_OPTS="$DRIVER_OPTS --driver-opt env.https_proxy=$https_proxy"
-      [ -n "${no_proxy:-}" ]    && DRIVER_OPTS="$DRIVER_OPTS --driver-opt env.no_proxy=$no_proxy"
-      [ -n "${HTTP_PROXY:-}" ]  && DRIVER_OPTS="$DRIVER_OPTS --driver-opt env.HTTP_PROXY=$HTTP_PROXY"
-      [ -n "${HTTPS_PROXY:-}" ] && DRIVER_OPTS="$DRIVER_OPTS --driver-opt env.HTTPS_PROXY=$HTTPS_PROXY"
-      [ -n "${NO_PROXY:-}" ]    && DRIVER_OPTS="$DRIVER_OPTS --driver-opt env.NO_PROXY=$NO_PROXY"
-      docker buildx create --use --name builder --driver-opt network=host $DRIVER_OPTS tls-ctx
+      docker buildx create --use --name builder \
+        --driver-opt network=host \
+        --driver-opt "env.http_proxy=${http_proxy:-}" \
+        --driver-opt "env.https_proxy=${https_proxy:-}" \
+        --driver-opt "env.no_proxy=${no_proxy:-}" \
+        --driver-opt "env.HTTP_PROXY=${HTTP_PROXY:-}" \
+        --driver-opt "env.HTTPS_PROXY=${HTTPS_PROXY:-}" \
+        --driver-opt "env.NO_PROXY=${NO_PROXY:-}" \
+        tls-ctx
     # Calcul du tag
     - |
       if [ -n "$CI_COMMIT_TAG" ]; then
