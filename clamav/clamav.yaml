@@ -197,7 +197,7 @@ os-release:
   version-id: "3.23"
   pretty-name: ClamAV Hardened / Alpine Linux v3.23
   home-url: https://docker.com/products/hardened-images/
-  bug-report-url: https://github.com/jbsky/stack-squid/issues
+  bug-report-url: https://github.com/jbsky/squid-hardened/issues
 
 annotations:
   org.opencontainers.image.description: ClamAV clamd + freshclam, DHI hardened, non-root

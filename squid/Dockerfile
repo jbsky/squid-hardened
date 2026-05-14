@@ -157,7 +157,7 @@ LABEL org.opencontainers.image.title="squid-hardened" \
       org.opencontainers.image.description="Squid 6 FROM scratch — SSL Bump + ICAP, non-root, zero shell" \
       org.opencontainers.image.vendor="jbsky" \
       org.opencontainers.image.licenses="GPL-2.0-or-later" \
-      org.opencontainers.image.source="https://github.com/jbsky/stack-squid"
+      org.opencontainers.image.source="https://github.com/jbsky/squid-hardened"
 
 # User accounts (for USER directive and getpwuid lookups via musl)
 COPY --from=prep /etc/passwd /etc/passwd

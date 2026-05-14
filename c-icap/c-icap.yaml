@@ -277,7 +277,7 @@ os-release:
   version-id: "3.23"
   pretty-name: c-icap Hardened / Alpine Linux v3.23
   home-url: https://docker.com/products/hardened-images/
-  bug-report-url: https://github.com/jbsky/stack-squid/issues
+  bug-report-url: https://github.com/jbsky/squid-hardened/issues
 
 annotations:
   org.opencontainers.image.description: c-icap 0.5.13 + squidclamav 7.3, compilés depuis les sources, DHI hardened, non-root
