@@ -17,7 +17,7 @@ variables:
   REGISTRY: $CI_REGISTRY                # GitLab registry par défaut
   IMAGE_NAMESPACE: $CI_PROJECT_PATH
   COSIGN_EXPERIMENTAL: "1"
-  PLATFORMS: "linux/amd64,linux/arm64"   # buildx target platforms
+  PLATFORMS: "linux/amd64"   # arm64 disabled: proxy 240s timeout kills multi-arch builds
 
 default:
   image: docker:27
