@@ -25,8 +25,8 @@ ENV CFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIE -D_FORTI
 #    Each RUN opens a fresh TCP connection to the proxy.
 
 # 1/3  Inject CA + switch to HTTP repos + core build toolchain
-RUN --mount=type=secret,id=ca-certs \
-    cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt \
+RUN --mount=type=secret,id=ca-certs,required=false \
+    [ -f /run/secrets/ca-certs ] && cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt || true \
  && sed -i 's|https://|http://|g' /etc/apk/repositories \
  && apk add \
         build-base \
@@ -56,8 +56,8 @@ RUN apk add \
 WORKDIR /src
 
 # Téléchargement (HTTPS + verif via openssl)
-RUN --mount=type=secret,id=ca-certs \
-    cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt \
+RUN --mount=type=secret,id=ca-certs,required=false \
+    [ -f /run/secrets/ca-certs ] && cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt || true \
  && curl -fsSL "https://www.squid-cache.org/Versions/v6/squid-${SQUID_VERSION}.tar.xz" -o squid.tar.xz \
  && curl -fsSL "https://www.squid-cache.org/Versions/v6/squid-${SQUID_VERSION}.tar.xz.asc" -o squid.tar.xz.asc \
  && tar -xJf squid.tar.xz \
