@@ -63,19 +63,33 @@ shellcheck:
     # Create docker context for TLS-enabled dind before buildx create
     # (Docker 27 buildx cannot load TLS data directly from environment)
     - docker context create tls-ctx
+    # Generate BuildKit daemon config for registry TLS trust.
+    # The BuildKit container (docker-container driver) needs the homelab CA
+    # to push to gitlab.home.arpa:5050 (HTTPS with private CA).
+    # This is separate from the --secret (which is for RUN instructions).
+    - |
+      mkdir -p /tmp/buildkit
+      cat > /tmp/buildkit/buildkitd.toml <<TOML
+      [registry."gitlab.home.arpa:5050"]
+        ca = ["/etc/ssl/certs/ca-certificates.crt"]
+      TOML
     # Pass proxy env to BuildKit container (docker-container driver creates
     # a separate container that doesn't inherit the build container's env).
     # network=host shares dind's network stack (DNS, /etc/hosts).
-    # Note: no_proxy/NO_PROXY omitted — Docker --driver-opt splits on commas
-    # which breaks comma-separated no_proxy values. Not needed: with
-    # network=host, BuildKit routes through the proxy for all external access.
+    # no_proxy=.home.arpa excludes local services (GitLab registry on :5050)
+    # from proxying. Uses domain suffix (no commas) to avoid pflag splitting.
+    # Without this, BuildKit proxies CONNECT to :5050, which Squid blocks
+    # (only port 443 is in SSL_ports → Forbidden).
     - |
       docker buildx create --use --name builder \
+        --config /tmp/buildkit/buildkitd.toml \
         --driver-opt network=host \
         --driver-opt "env.http_proxy=${http_proxy:-}" \
         --driver-opt "env.https_proxy=${https_proxy:-}" \
         --driver-opt "env.HTTP_PROXY=${HTTP_PROXY:-}" \
         --driver-opt "env.HTTPS_PROXY=${HTTPS_PROXY:-}" \
+        --driver-opt "env.no_proxy=.home.arpa" \
+        --driver-opt "env.NO_PROXY=.home.arpa" \
         tls-ctx
     # Calcul du tag
     - |
