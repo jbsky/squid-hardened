@@ -30,8 +30,6 @@ on:
       - 'squid/**'
       - 'c-icap/**'
       - 'clamav/**'
-  schedule:
-    - cron: '0 4 * * 1'
   workflow_dispatch:
 
 env:
@@ -159,7 +157,7 @@ jobs:
     name: DHI – ${{ matrix.image.name }}
     needs: [check-dhi, validate-dhi]
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request' && needs.check-dhi.outputs.has-dhi == 'true'
+    if: startsWith(github.ref, 'refs/tags/v') && needs.check-dhi.outputs.has-dhi == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -210,13 +208,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}
           tags: |
-            type=ref,event=branch
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=sha,format=long
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=schedule,pattern=nightly
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -308,8 +300,8 @@ jobs:
     name: Build – ${{ matrix.image.name }}
     needs: check-dhi
     runs-on: ubuntu-latest
-    # Only runs on push (not PR) and when DHI secrets are NOT available
-    if: github.event_name != 'pull_request' && needs.check-dhi.outputs.has-dhi == 'false'
+    # Only runs on tags (not PR/branch push) — DHI secrets NOT available = fallback
+    if: startsWith(github.ref, 'refs/tags/v') && needs.check-dhi.outputs.has-dhi == 'false'
     strategy:
       fail-fast: false
       matrix:
@@ -373,13 +365,7 @@ jobs:
         with:
           images: ${{ steps.images.outputs.list }}
           tags: |
-            type=ref,event=branch
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=sha,format=long
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=schedule,pattern=nightly
 
       - name: Build & Push
         id: build
