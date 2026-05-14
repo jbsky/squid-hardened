@@ -22,13 +22,12 @@ ENV CFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIE -D_FORTI
     CXXFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIE -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security" \
     LDFLAGS="-Wl,-z,relro,-z,now,-z,noexecstack -pie"
 
-# Switch APK repos to HTTP to bypass the SSL-bumping proxy which
-# intermittently returns 403 after ~4 min on re-bumped connections.
-# The CA secret is still injected for curl (source downloads use HTTPS).
+# Switch APK to HTTP (avoids SSL-bump 403s) and use persistent cache
+# so APK doesn't re-fetch indices mid-install (proxy drops after 240s).
 RUN --mount=type=secret,id=ca-certs \
     cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt \
  && sed -i 's|https://|http://|g' /etc/apk/repositories \
- && apk add --no-cache \
+ && apk add \
         build-base \
         autoconf automake libtool pkgconf \
         openssl-dev openssl \
@@ -40,7 +39,8 @@ RUN --mount=type=secret,id=ca-certs \
         krb5-dev libxml2-dev libnetfilter_conntrack-dev \
         nettle-dev gnutls-dev \
         cppunit-dev \
-        openldap-dev
+        openldap-dev \
+ && rm -rf /var/cache/apk/*
 
 WORKDIR /src
 
@@ -127,7 +127,7 @@ LABEL org.opencontainers.image.title="squid-hardened" \
 
 # Dépendances strictement runtime + tini comme PID 1
 RUN sed -i 's|https://|http://|g' /etc/apk/repositories \
- && apk add --no-cache \
+ && apk add \
         libstdc++ \
         openssl \
         ca-certificates \

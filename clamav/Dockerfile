@@ -15,7 +15,7 @@ ARG ALPINE_VERSION=3.20
 FROM alpine:${ALPINE_VERSION} AS builder
 
 RUN sed -i 's|https://|http://|g' /etc/apk/repositories \
- && apk add --no-cache \
+ && apk add \
         clamav \
         clamav-libunrar \
         tini \
