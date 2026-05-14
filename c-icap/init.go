@@ -55,6 +55,10 @@ func setupDirs() error {
 		uid  int
 		gid  int
 	}{
+		// Parent dirs first — 0755 root:root so non-root can traverse.
+		{"/var", 0755, 0, 0},
+		{"/var/log", 0755, 0, 0},
+		// Leaf dirs with correct ownership
 		{"/var/log/c-icap", 0755, cicapUID, cicapGID},
 		{"/run/c-icap", 0755, cicapUID, cicapGID},
 		{"/tmp", 01777, 0, 0},

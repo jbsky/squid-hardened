@@ -65,8 +65,16 @@ func diagVolume(path string) {
 // non-root).  On failure it returns an actionable error with the host-side
 // fix command.
 func ensureWritable(path string, uid, gid int) error {
-	if err := os.MkdirAll(path, 0750); err != nil {
-		return fmt.Errorf("cannot create %s: %w", path, err)
+	// Check the directory exists and is accessible
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("%s: %w\n"+
+			"  If this is a bind-mount, ensure the host directory exists and\n"+
+			"  its parent directories are traversable (mode 0755)",
+			path, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s exists but is not a directory", path)
 	}
 	// Fast path: already writable
 	tmp, err := os.CreateTemp(path, ".write-test-*")
@@ -76,7 +84,7 @@ func ensureWritable(path string, uid, gid int) error {
 		os.Remove(name)
 		return nil
 	}
-	// Not writable — attempt recursive chown (best-effort)
+	// Not writable — attempt recursive chown (best-effort, requires CAP_CHOWN)
 	fmt.Printf("[init] %s is not writable by uid %d, attempting chown to %d:%d\n", path, os.Getuid(), uid, gid)
 	if chErr := chownRecursive(path, uid, gid); chErr == nil {
 		// Retry write test
@@ -145,6 +153,11 @@ func setupDirs() error {
 		uid  int
 		gid  int
 	}{
+		// Parent dirs first — 0755 root:root so non-root can traverse.
+		{"/var", 0755, 0, 0},
+		{"/var/lib", 0755, 0, 0},
+		{"/var/log", 0755, 0, 0},
+		// Leaf dirs with correct ownership
 		{"/var/lib/clamav", 0750, clamavUID, clamavGID},
 		{"/var/log/clamav", 0750, clamavUID, clamavGID},
 		{"/run/clamav", 0755, clamavUID, clamavGID},
