@@ -60,6 +60,55 @@ func diagVolume(path string) {
 	fmt.Printf("[init][diag] write-test %s: OK\n", path)
 }
 
+// ensureWritable verifies that path is writable by the current process.
+// If not, it attempts chown (requires CAP_CHOWN — usually unavailable as
+// non-root).  On failure it returns an actionable error with the host-side
+// fix command.
+func ensureWritable(path string, uid, gid int) error {
+	if err := os.MkdirAll(path, 0750); err != nil {
+		return fmt.Errorf("cannot create %s: %w", path, err)
+	}
+	// Fast path: already writable
+	tmp, err := os.CreateTemp(path, ".write-test-*")
+	if err == nil {
+		name := tmp.Name()
+		tmp.Close()
+		os.Remove(name)
+		return nil
+	}
+	// Not writable — attempt recursive chown (best-effort)
+	fmt.Printf("[init] %s is not writable by uid %d, attempting chown to %d:%d\n", path, os.Getuid(), uid, gid)
+	if chErr := chownRecursive(path, uid, gid); chErr == nil {
+		// Retry write test
+		tmp2, err2 := os.CreateTemp(path, ".write-test-*")
+		if err2 == nil {
+			name := tmp2.Name()
+			tmp2.Close()
+			os.Remove(name)
+			fmt.Printf("[init] fixed ownership of %s to %d:%d\n", path, uid, gid)
+			return nil
+		}
+	}
+	return fmt.Errorf(
+		"%s is not writable by uid %d.\n"+
+			"  Bind-mounted volumes default to root:root on the host.\n"+
+			"  Fix with:\n\n"+
+			"    sudo chown -R %d:%d <host-path-mounted-to%s>\n\n"+
+			"  Then restart the container",
+		path, os.Getuid(), uid, gid, path,
+	)
+}
+
+// chownRecursive applies chown uid:gid to path and all contents.
+func chownRecursive(path string, uid, gid int) error {
+	return filepath.Walk(path, func(name string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		return os.Chown(name, uid, gid)
+	})
+}
+
 const (
 	clamavUID = 4000
 	clamavGID = 4000
@@ -146,7 +195,10 @@ func entrypoint() error {
 	freshclamConf := "/etc/clamav/freshclam.conf"
 
 	// 1) Initial signature download if DB is empty
-	diagVolume(dbDir)
+	if err := ensureWritable(dbDir, clamavUID, clamavGID); err != nil {
+		diagVolume(dbDir)
+		return err
+	}
 	if !hasSignatures(dbDir) {
 		fmt.Println("[init] Téléchargement initial des signatures (peut prendre plusieurs minutes)...")
 		cmd := exec.Command("freshclam",

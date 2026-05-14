@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -58,6 +59,55 @@ func diagVolume(path string) {
 	tmp.Close()
 	os.Remove(name)
 	fmt.Printf("[init][diag] write-test %s: OK\n", path)
+}
+
+// ensureWritable verifies that path is writable by the current process.
+// If not, it attempts chown (requires CAP_CHOWN — usually unavailable as
+// non-root).  On failure it returns an actionable error with the host-side
+// fix command.
+func ensureWritable(path string, uid, gid int) error {
+	if err := os.MkdirAll(path, 0750); err != nil {
+		return fmt.Errorf("cannot create %s: %w", path, err)
+	}
+	// Fast path: already writable
+	tmp, err := os.CreateTemp(path, ".write-test-*")
+	if err == nil {
+		name := tmp.Name()
+		tmp.Close()
+		os.Remove(name)
+		return nil
+	}
+	// Not writable — attempt recursive chown (best-effort)
+	log("%s is not writable by uid %d, attempting chown to %d:%d", path, os.Getuid(), uid, gid)
+	if chErr := chownRecursive(path, uid, gid); chErr == nil {
+		// Retry write test
+		tmp2, err2 := os.CreateTemp(path, ".write-test-*")
+		if err2 == nil {
+			name := tmp2.Name()
+			tmp2.Close()
+			os.Remove(name)
+			log("fixed ownership of %s to %d:%d", path, uid, gid)
+			return nil
+		}
+	}
+	return fmt.Errorf(
+		"%s is not writable by uid %d.\n"+
+			"  Bind-mounted volumes default to root:root on the host.\n"+
+			"  Fix with:\n\n"+
+			"    sudo chown -R %d:%d <host-path-mounted-to%s>\n\n"+
+			"  Then restart the container",
+		path, os.Getuid(), uid, gid, path,
+	)
+}
+
+// chownRecursive applies chown uid:gid to path and all contents.
+func chownRecursive(path string, uid, gid int) error {
+	return filepath.Walk(path, func(name string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		return os.Chown(name, uid, gid)
+	})
 }
 
 const (
@@ -160,7 +210,10 @@ func entrypoint() error {
 
 	if strings.Contains(confStr, "sslcrtd_program") || strings.Contains(confStr, "ssl_bump") {
 		sslDB := "/var/lib/ssl_db/db"
-		diagVolume("/var/lib/ssl_db")
+		if err := ensureWritable("/var/lib/ssl_db", squidUID, squidGID); err != nil {
+			diagVolume("/var/lib/ssl_db")
+			return err
+		}
 		if !exists(sslDB + "/index.txt") {
 			log("Initialisation de la DB SSL dans %s", sslDB)
 			if err := os.RemoveAll(sslDB); err != nil {
@@ -178,6 +231,10 @@ func entrypoint() error {
 
 	// 2) Cache init (if cache_dir directive present and cache empty)
 	if lineStartsWith(confStr, "cache_dir") && !exists("/var/spool/squid/00") {
+		if err := ensureWritable("/var/spool/squid", squidUID, squidGID); err != nil {
+			diagVolume("/var/spool/squid")
+			return err
+		}
 		log("Initialisation du cache Squid")
 		_ = run("squid", "-N", "-z", "-f", conf) // best-effort
 	}
