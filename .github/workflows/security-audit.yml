@@ -37,7 +37,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Trivy full scan (vuln + secret + misconfig)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}:latest
           format: 'sarif'
@@ -54,7 +54,7 @@ jobs:
           category: audit-${{ matrix.image }}
 
       - name: Trivy summary (text)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}:latest
           format: 'table'

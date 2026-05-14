@@ -206,7 +206,7 @@ jobs:
 
       - name: Extract metadata (tags + labels OCI)
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}
           tags: |
@@ -261,7 +261,7 @@ jobs:
 
       # 5) Scan Trivy + upload SARIF
       - name: Trivy scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}@${{ steps.build.outputs.digest }}
           format: sarif
@@ -344,7 +344,7 @@ jobs:
 
       - name: Extract metadata (tags + labels OCI)
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}
           tags: |
@@ -382,7 +382,7 @@ jobs:
           cosign sign --yes "${IMAGE}@${DIGEST}"
 
       - name: Trivy scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}@${{ steps.build.outputs.digest }}
           format: sarif
