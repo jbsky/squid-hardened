@@ -22,24 +22,37 @@ ENV CFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIE -D_FORTI
     CXXFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIE -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security" \
     LDFLAGS="-Wl,-z,relro,-z,now,-z,noexecstack -pie"
 
-# Switch APK to HTTP (avoids SSL-bump 403s) and use persistent cache
-# so APK doesn't re-fetch indices mid-install (proxy drops after 240s).
+# -- APK installs are split across multiple RUN commands so that each
+#    completes well within the proxy's 240-second connection timeout.
+#    Each RUN opens a fresh TCP connection to the proxy.
+
+# 1/3  Inject CA + switch to HTTP repos + core build toolchain
 RUN --mount=type=secret,id=ca-certs \
     cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt \
  && sed -i 's|https://|http://|g' /etc/apk/repositories \
  && apk add \
         build-base \
         autoconf automake libtool pkgconf \
-        openssl-dev openssl \
-        libcap-dev libcap \
         linux-headers \
         perl \
-        curl xz \
-        ca-certificates \
-        krb5-dev libxml2-dev libnetfilter_conntrack-dev \
+ && rm -rf /var/cache/apk/*
+
+# 2/3  Crypto / security libraries
+RUN apk add \
+        openssl-dev openssl \
+        libcap-dev libcap \
+        krb5-dev \
         nettle-dev gnutls-dev \
+ && rm -rf /var/cache/apk/*
+
+# 3/3  XML, network, test, LDAP libs + download tools
+RUN apk add \
+        libxml2-dev \
+        libnetfilter_conntrack-dev \
         cppunit-dev \
         openldap-dev \
+        curl xz \
+        ca-certificates \
  && rm -rf /var/cache/apk/*
 
 WORKDIR /src
@@ -125,21 +138,27 @@ LABEL org.opencontainers.image.title="squid-hardened" \
       org.opencontainers.image.licenses="GPL-2.0-or-later" \
       org.opencontainers.image.source="https://github.com/jbsky/stack-squid"
 
-# Dépendances strictement runtime + tini comme PID 1
+# -- Runtime APK installs split to stay within proxy 240s timeout --
+
+# 1/2  Switch to HTTP repos + core runtime libs
 RUN sed -i 's|https://|http://|g' /etc/apk/repositories \
  && apk add \
         libstdc++ \
         openssl \
         ca-certificates \
         libcap \
+        tini \
+        tzdata \
+ && rm -rf /var/cache/apk/*
+
+# 2/2  Additional runtime libs (Kerberos, XML, TLS, LDAP, netfilter)
+RUN apk add \
         krb5-libs \
         libxml2 \
         nettle gnutls \
         libnetfilter_conntrack \
         libltdl \
         libldap \
-        tini \
-        tzdata \
  && addgroup -S -g 3128 squid \
  && adduser  -S -D -H -G squid -u 3128 -s /sbin/nologin squid \
  && rm -rf /var/cache/apk/*

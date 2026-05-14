@@ -16,18 +16,25 @@ ARG SQUIDCLAMAV_VERSION
 ENV CFLAGS="-O2 -fstack-protector-strong -fPIE -D_FORTIFY_SOURCE=2" \
     LDFLAGS="-Wl,-z,relro,-z,now,-z,noexecstack -pie"
 
+# -- APK installs split to stay within proxy 240s timeout --
+
+# 1/2  Inject CA + switch to HTTP repos + core build toolchain + download tools
 RUN --mount=type=secret,id=ca-certs \
     cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt \
  && sed -i 's|https://|http://|g' /etc/apk/repositories \
  && apk add \
         build-base autoconf automake libtool pkgconf \
+        curl xz \
+        ca-certificates \
+ && rm -rf /var/cache/apk/*
+
+# 2/2  Development libraries
+RUN apk add \
         clamav-dev \
         curl-dev \
         zlib-dev bzip2-dev \
         pcre-dev pcre2-dev \
         openssl-dev \
-        curl xz \
-        ca-certificates \
  && rm -rf /var/cache/apk/*
 
 WORKDIR /src
@@ -84,16 +91,23 @@ LABEL org.opencontainers.image.title="c-icap-hardened" \
       org.opencontainers.image.description="c-icap server + squidclamav, non-root, hardened" \
       org.opencontainers.image.licenses="LGPL-2.1-or-later"
 
+# -- Runtime APK installs split to stay within proxy 240s timeout --
+
+# 1/2  Switch to HTTP repos + core runtime libs
 RUN sed -i 's|https://|http://|g' /etc/apk/repositories \
  && apk add \
-        clamav-libs \
-        libcurl \
-        zlib bzip2 \
-        pcre pcre2 \
         openssl \
         ca-certificates \
         tini \
         tzdata \
+ && rm -rf /var/cache/apk/*
+
+# 2/2  ClamAV + compression + regex libs
+RUN apk add \
+        clamav-libs \
+        libcurl \
+        zlib bzip2 \
+        pcre pcre2 \
  && addgroup -S -g 4100 cicap \
  && adduser  -S -D -H -G cicap -u 4100 -s /sbin/nologin cicap \
  && rm -rf /var/cache/apk/*

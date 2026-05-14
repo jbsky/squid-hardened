@@ -14,14 +14,21 @@ ARG ALPINE_VERSION=3.20
 # ---------- Stage 1 : builder (installe tout) ------------------------
 FROM alpine:${ALPINE_VERSION} AS builder
 
+# -- APK installs split to stay within proxy 240s timeout --
+
+# 1/2  Switch to HTTP repos + core packages
 RUN sed -i 's|https://|http://|g' /etc/apk/repositories \
  && apk add \
-        clamav \
-        clamav-libunrar \
-        tini \
         ca-certificates \
+        tini \
         tzdata \
         libstdc++ \
+ && rm -rf /var/cache/apk/*
+
+# 2/2  ClamAV packages (pulls in significant deps)
+RUN apk add \
+        clamav \
+        clamav-libunrar \
  && deluser clamav 2>/dev/null; delgroup clamav 2>/dev/null; \
     addgroup -S -g 4000 clamav \
  && adduser  -S -D -H -G clamav -u 4000 -s /sbin/nologin clamav \
