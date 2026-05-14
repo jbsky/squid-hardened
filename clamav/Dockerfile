@@ -37,7 +37,7 @@ RUN chown root:clamav /etc/clamav/clamd.conf /etc/clamav/freshclam.conf \
 RUN rm -rf /lib/apk /var/cache/apk /etc/apk /sbin/apk
 
 # ---------- Stage 2 : Go builder (entrypoint + healthcheck) ---------
-FROM golang:1.22-alpine AS gobuilder
+FROM golang:1.26-alpine AS gobuilder
 WORKDIR /build
 COPY go.mod init.go ./
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags='-s -w' -o /init .

@@ -78,7 +78,7 @@ RUN find /out -type f \( -name '*.so*' -o -perm -111 \) -exec sh -c 'file "$1" 2
 RUN rm -rf /out/var/run
 
 # ---------- Stage 2 : Go builder (entrypoint + healthcheck) ---------
-FROM golang:1.22-alpine AS gobuilder
+FROM golang:1.26-alpine AS gobuilder
 WORKDIR /build
 COPY go.mod init.go ./
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags='-s -w' -o /init .
