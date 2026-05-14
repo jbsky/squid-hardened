@@ -59,7 +59,12 @@ shellcheck:
   stage: build
   script:
     - apk add --no-cache git
-    - docker run --privileged --rm tonistiigi/binfmt --install all
+    # binfmt emulation only needed for cross-arch builds (e.g. arm64 on amd64).
+    # Skipped when PLATFORMS is amd64-only to avoid a Docker Hub pull.
+    - |
+      if echo "${PLATFORMS}" | grep -qv '^linux/amd64$'; then
+        docker run --privileged --rm tonistiigi/binfmt --install all
+      fi
     # Create docker context for TLS-enabled dind before buildx create
     # (Docker 27 buildx cannot load TLS data directly from environment)
     - docker context create tls-ctx
