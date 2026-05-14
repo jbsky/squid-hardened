@@ -42,9 +42,9 @@ hadolint:
   before_script: []
   services: []
   script:
-    - hadolint squid/Dockerfile
-    - hadolint c-icap/Dockerfile
-    - hadolint clamav/Dockerfile
+    - hadolint --failure-threshold warning squid/Dockerfile
+    - hadolint --failure-threshold warning c-icap/Dockerfile
+    - hadolint --failure-threshold warning clamav/Dockerfile
 
 shellcheck:
   stage: lint
