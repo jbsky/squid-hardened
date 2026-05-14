@@ -86,11 +86,15 @@ shellcheck:
         TAG="${CI_COMMIT_SHORT_SHA}"
         EXTRA_TAGS="-t ${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:latest"
       fi
+    # Expose host CA bundle as a BuildKit secret for Dockerfile RUN commands
+    # that need to trust the SSL-bumping proxy CA (apk add, curl, etc.).
+    # The file is available in the CI container via runner docker_volumes mount.
     - |
       docker buildx build \
         --platform "${PLATFORMS}" \
         --provenance=mode=max \
         --sbom=true \
+        --secret id=ca-certs,src=/etc/ssl/certs/ca-certificates.crt \
         --label "org.opencontainers.image.source=${CI_PROJECT_URL}" \
         --label "org.opencontainers.image.revision=${CI_COMMIT_SHA}" \
         --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \

@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.7
 # =====================================================================
 #  Squid Hardened Image - SSL Bump + ICAP client
 #  Multi-stage build : compile from source -> minimal runtime
@@ -23,7 +22,8 @@ ENV CFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIE -D_FORTI
     CXXFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIE -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security" \
     LDFLAGS="-Wl,-z,relro,-z,now,-z,noexecstack -pie"
 
-RUN apk add --no-cache \
+RUN --mount=type=secret,id=ca-certs,target=/etc/ssl/certs/ca-certificates.crt \
+    apk add --no-cache \
         build-base \
         autoconf automake libtool pkgconf \
         openssl-dev openssl \
@@ -40,7 +40,8 @@ RUN apk add --no-cache \
 WORKDIR /src
 
 # Téléchargement (HTTPS + verif via openssl)
-RUN curl -fsSL "https://www.squid-cache.org/Versions/v6/squid-${SQUID_VERSION}.tar.xz" -o squid.tar.xz \
+RUN --mount=type=secret,id=ca-certs,target=/etc/ssl/certs/ca-certificates.crt \
+    curl -fsSL "https://www.squid-cache.org/Versions/v6/squid-${SQUID_VERSION}.tar.xz" -o squid.tar.xz \
  && curl -fsSL "https://www.squid-cache.org/Versions/v6/squid-${SQUID_VERSION}.tar.xz.asc" -o squid.tar.xz.asc \
  && tar -xJf squid.tar.xz \
  && mv "squid-${SQUID_VERSION}" squid
@@ -119,7 +120,8 @@ LABEL org.opencontainers.image.title="squid-hardened" \
       org.opencontainers.image.source="https://github.com/jbsky/stack-squid"
 
 # Dépendances strictement runtime + tini comme PID 1
-RUN apk add --no-cache \
+RUN --mount=type=secret,id=ca-certs,target=/etc/ssl/certs/ca-certificates.crt \
+    apk add --no-cache \
         libstdc++ \
         openssl \
         ca-certificates \

@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.7
 # =====================================================================
 #  ClamAV Hardened Image – multi-stage CORRIGÉ
 #  Problème précédent : mono-stage, apk + runtime dans le même layer.
@@ -15,7 +14,8 @@ ARG ALPINE_VERSION=3.20
 # ---------- Stage 1 : builder (installe tout) ------------------------
 FROM alpine:${ALPINE_VERSION} AS builder
 
-RUN apk add --no-cache \
+RUN --mount=type=secret,id=ca-certs,target=/etc/ssl/certs/ca-certificates.crt \
+    apk add --no-cache \
         clamav \
         clamav-libunrar \
         tini \
