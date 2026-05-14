@@ -263,7 +263,7 @@ jobs:
       # 6) Attestation SLSA GitHub (Build Provenance)
       - name: GitHub SLSA Attestation
         if: "!startsWith(github.ref, 'refs/heads/dependabot/')"
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}
           subject-digest: ${{ steps.build.outputs.digest }}
@@ -383,7 +383,7 @@ jobs:
 
       - name: GitHub SLSA Attestation
         if: "!startsWith(github.ref, 'refs/heads/dependabot/')"
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}
           subject-digest: ${{ steps.build.outputs.digest }}
