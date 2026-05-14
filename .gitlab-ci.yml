@@ -61,7 +61,10 @@ shellcheck:
   script:
     - apk add --no-cache git
     - docker run --privileged --rm tonistiigi/binfmt --install all
-    - docker buildx create --use --name builder
+    # Create docker context for TLS-enabled dind before buildx create
+    # (Docker 27 buildx cannot load TLS data directly from environment)
+    - docker context create tls-ctx
+    - docker buildx create --use --name builder tls-ctx
     # Calcul du tag
     - |
       if [ -n "$CI_COMMIT_TAG" ]; then
@@ -72,18 +75,18 @@ shellcheck:
         EXTRA_TAGS="-t ${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:latest"
       fi
     - |
-      docker buildx build \
-        --platform "${PLATFORMS}" \
-        --provenance=mode=max \
-        --sbom=true \
-        --label "org.opencontainers.image.source=${CI_PROJECT_URL}" \
-        --label "org.opencontainers.image.revision=${CI_COMMIT_SHA}" \
-        --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-        --cache-from type=registry,ref=${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:buildcache \
-        --cache-to   type=registry,ref=${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:buildcache,mode=max \
-        -t ${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:${TAG} \
-        ${EXTRA_TAGS} \
-        --push \
+      docker buildx build \\
+        --platform "${PLATFORMS}" \\
+        --provenance=mode=max \\
+        --sbom=true \\
+        --label "org.opencontainers.image.source=${CI_PROJECT_URL}" \\
+        --label "org.opencontainers.image.revision=${CI_COMMIT_SHA}" \\
+        --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \\
+        --cache-from type=registry,ref=${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:buildcache \\
+        --cache-to   type=registry,ref=${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:buildcache,mode=max \\
+        -t ${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:${TAG} \\
+        ${EXTRA_TAGS} \\
+        --push \\
         ./${BUILD_CONTEXT}
     - docker buildx imagetools inspect ${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:${TAG} | tee image-digest-${IMAGE_NAME}.txt
   artifacts:
