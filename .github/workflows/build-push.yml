@@ -80,17 +80,34 @@ jobs:
           additional_files: 'squid/entrypoint.sh c-icap/entrypoint.sh clamav/entrypoint.sh'
 
   # -------------------------------------------------------------------
+  #  Check if DHI credentials are configured
+  # -------------------------------------------------------------------
+  check-dhi:
+    name: Check DHI credentials
+    runs-on: ubuntu-latest
+    needs: lint
+    outputs:
+      has-dhi: ${{ steps.check.outputs.has-dhi }}
+    steps:
+      - id: check
+        env:
+          DHI_USER: ${{ secrets.DOCKER_USERNAME }}
+        run: |
+          if [ -n "$DHI_USER" ]; then
+            echo "has-dhi=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-dhi=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # -------------------------------------------------------------------
   #  Validation YAML DHI (parse-check avant le vrai build)
   #  Skipped if DHI credentials are not configured
   # -------------------------------------------------------------------
   validate-dhi:
     name: Validate DHI YAML
     runs-on: ubuntu-latest
-    needs: lint
-    # Requires dhi.io credentials — skip when secrets are not available
-    if: |
-      secrets.DOCKER_USERNAME != '' &&
-      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    needs: check-dhi
+    if: needs.check-dhi.outputs.has-dhi == 'true'
     steps:
       - uses: actions/checkout@v4
 
@@ -140,9 +157,9 @@ jobs:
   # -------------------------------------------------------------------
   build-dhi:
     name: DHI – ${{ matrix.image.name }}
-    needs: validate-dhi
+    needs: [check-dhi, validate-dhi]
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request' && secrets.DOCKER_USERNAME != ''
+    if: github.event_name != 'pull_request' && needs.check-dhi.outputs.has-dhi == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -289,10 +306,10 @@ jobs:
   # -------------------------------------------------------------------
   build-dockerfile:
     name: Build – ${{ matrix.image.name }}
-    needs: lint
+    needs: check-dhi
     runs-on: ubuntu-latest
     # Only runs on push (not PR) and when DHI secrets are NOT available
-    if: github.event_name != 'pull_request' && secrets.DOCKER_USERNAME == ''
+    if: github.event_name != 'pull_request' && needs.check-dhi.outputs.has-dhi == 'false'
     strategy:
       fail-fast: false
       matrix:
