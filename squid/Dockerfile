@@ -22,7 +22,8 @@ ENV CFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIE -D_FORTI
     CXXFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIE -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security" \
     LDFLAGS="-Wl,-z,relro,-z,now,-z,noexecstack -pie"
 
-RUN --mount=type=secret,id=ca-certs,target=/etc/ssl/certs/ca-certificates.crt \
+RUN --mount=type=secret,id=ca-certs \
+    SSL_CERT_FILE=/run/secrets/ca-certs \
     apk add --no-cache \
         build-base \
         autoconf automake libtool pkgconf \
@@ -40,7 +41,8 @@ RUN --mount=type=secret,id=ca-certs,target=/etc/ssl/certs/ca-certificates.crt \
 WORKDIR /src
 
 # Téléchargement (HTTPS + verif via openssl)
-RUN --mount=type=secret,id=ca-certs,target=/etc/ssl/certs/ca-certificates.crt \
+RUN --mount=type=secret,id=ca-certs \
+    SSL_CERT_FILE=/run/secrets/ca-certs \
     curl -fsSL "https://www.squid-cache.org/Versions/v6/squid-${SQUID_VERSION}.tar.xz" -o squid.tar.xz \
  && curl -fsSL "https://www.squid-cache.org/Versions/v6/squid-${SQUID_VERSION}.tar.xz.asc" -o squid.tar.xz.asc \
  && tar -xJf squid.tar.xz \
@@ -120,7 +122,8 @@ LABEL org.opencontainers.image.title="squid-hardened" \
       org.opencontainers.image.source="https://github.com/jbsky/stack-squid"
 
 # Dépendances strictement runtime + tini comme PID 1
-RUN --mount=type=secret,id=ca-certs,target=/etc/ssl/certs/ca-certificates.crt \
+RUN --mount=type=secret,id=ca-certs \
+    SSL_CERT_FILE=/run/secrets/ca-certs \
     apk add --no-cache \
         libstdc++ \
         openssl \

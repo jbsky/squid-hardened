@@ -14,7 +14,8 @@ ARG ALPINE_VERSION=3.20
 # ---------- Stage 1 : builder (installe tout) ------------------------
 FROM alpine:${ALPINE_VERSION} AS builder
 
-RUN --mount=type=secret,id=ca-certs,target=/etc/ssl/certs/ca-certificates.crt \
+RUN --mount=type=secret,id=ca-certs \
+    SSL_CERT_FILE=/run/secrets/ca-certs \
     apk add --no-cache \
         clamav \
         clamav-libunrar \
