@@ -166,19 +166,27 @@ build:clamav:
     BUILD_CONTEXT: clamav
 
 # ---------- SIGN (cosign keyless via OIDC GitLab) -------------------
+# NOTE: cosign keyless signing requires connectivity to Sigstore infra
+# (Fulcio + Rekor at sigstore.dev). Behind a SSL-bumping proxy this may
+# fail due to certificate pinning. allow_failure: true makes it advisory.
 .sign-template: &sign-template
   stage: sign
-  image:
-    name: gcr.io/projectsigstore/cosign:latest
-    entrypoint: [""]
+  image: alpine:3.20
   before_script: []
   services: []
   id_tokens:
     SIGSTORE_ID_TOKEN:
       aud: sigstore
   script:
+    # Install cosign from GitHub releases (goes through proxy; CA cert is
+    # mounted by the runner at /etc/ssl/certs/ca-certificates.crt).
+    - apk add --no-cache curl
+    - COSIGN_VERSION=$(curl -fsSL https://api.github.com/repos/sigstore/cosign/releases/latest | grep -o '"tag_name":"[^"]*"' | cut -d'"' -f4)
+    - curl -fsSL -o /usr/local/bin/cosign "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
+    - chmod +x /usr/local/bin/cosign
     - DIGEST=$(grep -o 'sha256:[a-f0-9]*' image-digest-${IMAGE_NAME}.txt | head -1)
     - cosign sign --yes ${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}@${DIGEST}
+  allow_failure: true
 
 sign:squid:
   <<: *sign-template
@@ -207,6 +215,12 @@ sign:clamav:
   before_script: []
   services: []
   script:
+    # Authenticate trivy to the GitLab registry for pulling images to scan.
+    # Without this, trivy gets DENIED from the JWT auth endpoint.
+    # Also trust the homelab CA for the registry's TLS certificate.
+    - export TRIVY_USERNAME="$CI_REGISTRY_USER"
+    - export TRIVY_PASSWORD="$CI_REGISTRY_PASSWORD"
+    - export SSL_CERT_FILE="/etc/ssl/certs/ca-certificates.crt"
     - trivy image --severity HIGH,CRITICAL --ignore-unfixed
         --format sarif --output trivy-${IMAGE_NAME}.sarif
         ${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:latest
