@@ -18,6 +18,7 @@ ENV CFLAGS="-O2 -fstack-protector-strong -fPIE -D_FORTIFY_SOURCE=2" \
 
 RUN --mount=type=secret,id=ca-certs \
     cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt \
+ && sed -i 's|https://|http://|g' /etc/apk/repositories \
  && apk add --no-cache \
         build-base autoconf automake libtool pkgconf \
         clamav-dev \
@@ -82,8 +83,7 @@ LABEL org.opencontainers.image.title="c-icap-hardened" \
       org.opencontainers.image.description="c-icap server + squidclamav, non-root, hardened" \
       org.opencontainers.image.licenses="LGPL-2.1-or-later"
 
-RUN --mount=type=secret,id=ca-certs \
-    cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt \
+RUN sed -i 's|https://|http://|g' /etc/apk/repositories \
  && apk add --no-cache \
         clamav-libs \
         libcurl \

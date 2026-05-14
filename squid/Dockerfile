@@ -22,11 +22,12 @@ ENV CFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIE -D_FORTI
     CXXFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIE -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security" \
     LDFLAGS="-Wl,-z,relro,-z,now,-z,noexecstack -pie"
 
-# Inject homelab CA into the trust store before any network access.
-# The SSL-bumping proxy re-signs all TLS certs with this CA; without it,
-# apk/curl fail after ~4 min when the proxy's cached bump-cert expires.
+# Switch APK repos to HTTP to bypass the SSL-bumping proxy which
+# intermittently returns 403 after ~4 min on re-bumped connections.
+# The CA secret is still injected for curl (source downloads use HTTPS).
 RUN --mount=type=secret,id=ca-certs \
     cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt \
+ && sed -i 's|https://|http://|g' /etc/apk/repositories \
  && apk add --no-cache \
         build-base \
         autoconf automake libtool pkgconf \
@@ -125,8 +126,7 @@ LABEL org.opencontainers.image.title="squid-hardened" \
       org.opencontainers.image.source="https://github.com/jbsky/stack-squid"
 
 # Dépendances strictement runtime + tini comme PID 1
-RUN --mount=type=secret,id=ca-certs \
-    cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt \
+RUN sed -i 's|https://|http://|g' /etc/apk/repositories \
  && apk add --no-cache \
         libstdc++ \
         openssl \
