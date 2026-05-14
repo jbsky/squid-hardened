@@ -189,7 +189,7 @@ jobs:
 
       - name: Extract metadata (tags + labels OCI)
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}
           tags: |
@@ -327,7 +327,7 @@ jobs:
 
       - name: Extract metadata (tags + labels OCI)
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}
           tags: |
