@@ -342,11 +342,36 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Login Docker Hub
+        id: dockerhub-login
+        if: env.HAS_DOCKERHUB == 'true'
+        uses: docker/login-action@v3
+        env:
+          HAS_DOCKERHUB: ${{ secrets.DOCKERHUB_TOKEN != '' }}
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Compute image list
+        id: images
+        env:
+          HAS_DOCKERHUB: ${{ secrets.DOCKERHUB_TOKEN != '' }}
+          DOCKERHUB_NS: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          IMAGES="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}"
+          if [ "$HAS_DOCKERHUB" = "true" ]; then
+            IMAGES="${IMAGES}
+          docker.io/${DOCKERHUB_NS}/${{ matrix.image.name }}"
+          fi
+          echo "list<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$IMAGES" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
       - name: Extract metadata (tags + labels OCI)
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}
+          images: ${{ steps.images.outputs.list }}
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
@@ -407,12 +432,18 @@ jobs:
           push-to-registry: true
 
       - name: Summary
+        env:
+          HAS_DOCKERHUB: ${{ secrets.DOCKERHUB_TOKEN != '' }}
+          DOCKERHUB_NS: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
           echo "### ${{ matrix.image.name }}" >> $GITHUB_STEP_SUMMARY
           echo "**Digest :** \`${{ steps.build.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "docker pull ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}:latest" >> $GITHUB_STEP_SUMMARY
+          if [ "$HAS_DOCKERHUB" = "true" ]; then
+            echo "docker pull docker.io/${DOCKERHUB_NS}/${{ matrix.image.name }}:latest" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
 
   # -------------------------------------------------------------------
