@@ -26,6 +26,13 @@ default:
   before_script:
     - docker info >/dev/null
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    # Authenticate to Docker Hub to avoid anonymous pull rate limits (100/6h → 200/6h).
+    # DOCKERHUB_USER and DOCKERHUB_TOKEN are CI variables (project-level).
+    # DOCKER_AUTH_CONFIG handles runner image pulls; this handles in-job docker commands.
+    - |
+      if [ -n "$DOCKERHUB_TOKEN" ]; then
+        echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USER" --password-stdin docker.io
+      fi
 
 workflow:
   rules:
