@@ -59,7 +59,7 @@ shellcheck:
   before_script: []
   services: []
   script:
-    - shellcheck scripts/*.sh squid/entrypoint.sh c-icap/entrypoint.sh clamav/entrypoint.sh
+    - shellcheck scripts/*.sh
 
 # ---------- BUILD (matrix-like via parallel:matrix) -----------------
 .build-template: &build-template

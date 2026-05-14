@@ -1,6 +1,6 @@
 # =====================================================================
 #  C-ICAP + squidclamav Hardened Image
-#  Multi-stage : compile c-icap + module squidclamav -> minimal runtime
+#  4-stage build : compile c-icap + squidclamav -> Go init -> prep -> FROM scratch
 # =====================================================================
 
 ARG ALPINE_VERSION=3.20
@@ -74,66 +74,92 @@ RUN make -C /src/c-icap install \
 # Strip
 RUN find /out -type f \( -name '*.so*' -o -perm -111 \) -exec sh -c 'file "$1" 2>/dev/null | grep -q "ELF" && strip "$1" 2>/dev/null || true' _ {} \;
 
-# Remove /out/var/run created by make install — conflicts with /var/run -> /run symlink in Alpine
-RUN rm -rf /out/var/run \
- && install -d -m 0755 /out/var/log/c-icap /out/run/c-icap
+# Remove /out/var/run created by make install — conflicts with /var/run -> /run symlink
+RUN rm -rf /out/var/run
 
-# ---------- Stage 1b : Go builder (entrypoint + healthcheck) ---------
+# ---------- Stage 2 : Go builder (entrypoint + healthcheck) ---------
 FROM golang:1.22-alpine AS gobuilder
 WORKDIR /build
 COPY go.mod init.go ./
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags='-s -w' -o /init .
 
-# ---------- Stage 2 : runtime ----------------------------------------
-FROM alpine:${ALPINE_VERSION} AS runtime
-
-LABEL org.opencontainers.image.title="c-icap-hardened" \
-      org.opencontainers.image.description="c-icap server + squidclamav, non-root, hardened" \
-      org.opencontainers.image.licenses="LGPL-2.1-or-later"
+# ---------- Stage 3 : prep (assemble runtime filesystem) ------------
+FROM alpine:${ALPINE_VERSION} AS prep
 
 # -- Runtime APK installs split to stay within proxy 240s timeout --
 
-# 1/2  Switch to HTTP repos + core runtime libs
+# 1/2  Core runtime libs
 RUN sed -i 's|https://|http://|g' /etc/apk/repositories \
- && apk add \
+ && apk add --no-cache \
         openssl \
         ca-certificates \
-        tini \
-        tzdata \
- && rm -rf /var/cache/apk/*
+        tini-static \
+        tzdata
 
 # 2/2  ClamAV + compression + regex libs
-RUN apk add \
+RUN apk add --no-cache \
         clamav-libs \
         libcurl \
         zlib bzip2 \
         pcre pcre2 \
  && addgroup -S -g 4100 cicap \
- && adduser  -S -D -H -G cicap -u 4100 -s /sbin/nologin cicap \
- && rm -rf /var/cache/apk/*
+ && adduser  -S -D -H -G cicap -u 4100 -s /sbin/nologin cicap
 
+# c-icap + squidclamav binaries from builder
 COPY --from=builder /out/ /
 
+# Config files (set ownership + permissions while we have a shell)
 COPY c-icap.conf       /etc/c-icap/c-icap.conf
 COPY squidclamav.conf  /etc/c-icap/squidclamav.conf
+RUN chown root:cicap /etc/c-icap/*.conf \
+ && chmod 0640       /etc/c-icap/*.conf
 
-# Go init binary (entrypoint + healthcheck, static, no shell needed)
+# Strip APK/package-manager artifacts
+RUN rm -rf /lib/apk /var/cache/apk /etc/apk /sbin/apk
+
+# ---------- Stage 4 : FROM scratch (final hardened image) -----------
+FROM scratch
+
+LABEL org.opencontainers.image.title="c-icap-hardened" \
+      org.opencontainers.image.description="c-icap + squidclamav FROM scratch, non-root, zero shell" \
+      org.opencontainers.image.licenses="LGPL-2.1-or-later"
+
+# User accounts
+COPY --from=prep /etc/passwd /etc/passwd
+COPY --from=prep /etc/group  /etc/group
+
+# Dynamic linker (musl) + shared libraries
+COPY --from=prep /lib/ /lib/
+COPY --from=prep /usr/lib/ /usr/lib/
+
+# c-icap binary + modules
+COPY --from=prep /usr/bin/c-icap /usr/bin/c-icap
+COPY --from=prep /usr/share/c_icap/ /usr/share/c_icap/
+
+# Config (with correct ownership from prep stage)
+COPY --from=prep /etc/c-icap/ /etc/c-icap/
+
+# TLS trust store + timezone data
+COPY --from=prep /etc/ssl/ /etc/ssl/
+COPY --from=prep /usr/share/zoneinfo/ /usr/share/zoneinfo/
+
+# PID 1 — tini-static
+COPY --from=prep /sbin/tini-static /sbin/tini
+
+# Go init binary (static, entrypoint + healthcheck + setup-dirs)
 COPY --from=gobuilder /init /usr/local/bin/init
 
-RUN chown -R cicap:cicap /var/log/c-icap /run/c-icap \
- && chown root:cicap     /etc/c-icap/*.conf \
- && chmod 0640           /etc/c-icap/*.conf
+# Create runtime directories with correct ownership (no shell needed)
+RUN ["/usr/local/bin/init", "--setup-dirs"]
 
-# ── Runtime hardening: remove shell + package manager entirely ───────
-RUN for f in $(/bin/busybox --list-full); do /bin/busybox rm -f "/$f"; done; \
-    /bin/busybox rm -rf /bin/busybox /sbin/apk /etc/apk /lib/apk /var/cache/apk /usr/bin/bz*
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-USER cicap:cicap
+USER 4100:4100
 
 EXPOSE 1344/tcp
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD ["/usr/local/bin/init", "--healthcheck"]
 
-ENTRYPOINT ["/sbin/tini","--","/usr/local/bin/init"]
-CMD ["c-icap","-N","-D","-f","/etc/c-icap/c-icap.conf"]
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/init"]
+CMD ["c-icap", "-N", "-D", "-f", "/etc/c-icap/c-icap.conf"]

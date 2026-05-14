@@ -1,14 +1,12 @@
 # =====================================================================
 #  Squid Hardened Image - SSL Bump + ICAP client
-#  Multi-stage build : compile from source -> minimal runtime
+#  4-stage build : compile -> Go init -> prep runtime -> FROM scratch
 #  Conformité Docker Hardened Image :
-#   - multi-stage
-#   - utilisateur non-root
+#   - FROM scratch final stage: zero shell, zero package manager
+#   - utilisateur non-root (uid 3128)
 #   - binaires strip + RELRO + PIE + stack-protector
-#   - package manager (apk) et shell (busybox) absents du runtime
 #   - entrypoint + healthcheck en binaire Go statique
 #   - filesystem read-only friendly
-#   - aucune capabilité root requise au runtime
 # =====================================================================
 
 ARG SQUID_VERSION=6.10
@@ -110,49 +108,33 @@ RUN make -j"$(nproc)" \
  && strip /out/usr/sbin/squid \
           /out/usr/lib/squid/*-cert.d || true
 
-# Création des répertoires runtime que Squid attend
-# Remove /out/var/run created by make install — conflicts with /var/run -> /run symlink in Alpine
-# Copy mime.conf to /usr/share/squid/ so it survives /etc/squid volume mounts
+# Remove /out/var/run (conflicts with /run symlink) + copy mime.conf
 RUN rm -rf /out/var/run \
- && install -d -m 0755 /out/var/log/squid \
-                       /out/var/spool/squid \
-                       /out/var/lib/ssl_db \
-                       /out/run \
-                       /out/etc/squid/ssl_cert \
-                       /out/usr/share/squid \
  && cp /out/etc/squid/mime.conf /out/usr/share/squid/mime.conf
 
-# ---------- Stage 1b : Go builder (entrypoint + healthcheck) ---------
+# ---------- Stage 2 : Go builder (entrypoint + healthcheck) ---------
 FROM golang:1.22-alpine AS gobuilder
 WORKDIR /build
 COPY go.mod init.go ./
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags='-s -w' -o /init .
 
-# ---------- Stage 2 : runtime hardened -------------------------------
-FROM alpine:${ALPINE_VERSION} AS runtime
-
-# Métadonnées OCI
-LABEL org.opencontainers.image.title="squid-hardened" \
-      org.opencontainers.image.description="Squid 6 hardened avec SSL Bump + ICAP, non-root, distroless-style" \
-      org.opencontainers.image.vendor="jbsky" \
-      org.opencontainers.image.licenses="GPL-2.0-or-later" \
-      org.opencontainers.image.source="https://github.com/jbsky/stack-squid"
+# ---------- Stage 3 : prep (assemble runtime filesystem) ------------
+FROM alpine:${ALPINE_VERSION} AS prep
 
 # -- Runtime APK installs split to stay within proxy 240s timeout --
 
-# 1/2  Switch to HTTP repos + core runtime libs
+# 1/2  Core runtime libs
 RUN sed -i 's|https://|http://|g' /etc/apk/repositories \
- && apk add \
+ && apk add --no-cache \
         libstdc++ \
         openssl \
         ca-certificates \
         libcap \
-        tini \
-        tzdata \
- && rm -rf /var/cache/apk/*
+        tini-static \
+        tzdata
 
 # 2/2  Additional runtime libs (Kerberos, XML, TLS, LDAP, netfilter)
-RUN apk add \
+RUN apk add --no-cache \
         krb5-libs \
         libxml2 \
         nettle gnutls \
@@ -160,32 +142,59 @@ RUN apk add \
         libltdl \
         libldap \
  && addgroup -S -g 3128 squid \
- && adduser  -S -D -H -G squid -u 3128 -s /sbin/nologin squid \
- && rm -rf /var/cache/apk/*
+ && adduser  -S -D -H -G squid -u 3128 -s /sbin/nologin squid
 
-# Copie depuis le builder
+# Squid binaries + data from builder
 COPY --from=builder /out/ /
 
-# Go init binary (entrypoint + healthcheck, static, no shell needed)
+# Strip APK/package-manager artifacts (not needed in final image)
+RUN rm -rf /lib/apk /var/cache/apk /etc/apk /sbin/apk
+
+# ---------- Stage 4 : FROM scratch (final hardened image) -----------
+FROM scratch
+
+LABEL org.opencontainers.image.title="squid-hardened" \
+      org.opencontainers.image.description="Squid 6 FROM scratch — SSL Bump + ICAP, non-root, zero shell" \
+      org.opencontainers.image.vendor="jbsky" \
+      org.opencontainers.image.licenses="GPL-2.0-or-later" \
+      org.opencontainers.image.source="https://github.com/jbsky/stack-squid"
+
+# User accounts (for USER directive and getpwuid lookups via musl)
+COPY --from=prep /etc/passwd /etc/passwd
+COPY --from=prep /etc/group  /etc/group
+
+# Dynamic linker (musl) + shared libraries
+COPY --from=prep /lib/ /lib/
+COPY --from=prep /usr/lib/ /usr/lib/
+
+# Squid binary + data files (error pages, icons, mime.conf)
+COPY --from=prep /usr/sbin/squid /usr/sbin/squid
+COPY --from=prep /usr/share/squid/ /usr/share/squid/
+
+# Default config (overridden by volume mount at runtime)
+COPY --from=prep /etc/squid/ /etc/squid/
+
+# TLS trust store + timezone data
+COPY --from=prep /etc/ssl/ /etc/ssl/
+COPY --from=prep /usr/share/zoneinfo/ /usr/share/zoneinfo/
+
+# PID 1 — tini-static (no musl dependency for PID 1 reliability)
+COPY --from=prep /sbin/tini-static /sbin/tini
+
+# Go init binary (static, entrypoint + healthcheck + setup-dirs)
 COPY --from=gobuilder /init /usr/local/bin/init
 
-# Permissions strictes
-RUN chown -R squid:squid /var/log/squid /var/spool/squid /var/lib/ssl_db /run /etc/squid \
- && chmod 0750 /var/lib/ssl_db \
- && chmod 0755 /var/log/squid /var/spool/squid
+# Create runtime directories with correct ownership (no shell needed)
+RUN ["/usr/local/bin/init", "--setup-dirs"]
 
-# ── Runtime hardening: remove shell + package manager entirely ───────
-# Go static binary replaces entrypoint.sh — no /bin/sh needed at runtime.
-# busybox + apk are fully removed; the running shell deletes itself.
-RUN for f in $(/bin/busybox --list-full); do /bin/busybox rm -f "/$f"; done; \
-    /bin/busybox rm -rf /bin/busybox /sbin/apk /etc/apk /lib/apk /var/cache/apk
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-USER squid:squid
+USER 3128:3128
 
 EXPOSE 3128/tcp 3130/tcp
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD ["/usr/local/bin/init", "--healthcheck"]
 
-ENTRYPOINT ["/sbin/tini","--","/usr/local/bin/init"]
-CMD ["squid","-N","-d","1","-f","/etc/squid/squid.conf"]
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/init"]
+CMD ["squid", "-N", "-d", "1", "-f", "/etc/squid/squid.conf"]
