@@ -89,11 +89,22 @@ shellcheck:
     # Expose host CA bundle as a BuildKit secret for Dockerfile RUN commands
     # that need to trust the SSL-bumping proxy CA (apk add, curl, etc.).
     # The file is available in the CI container via runner docker_volumes mount.
+    # Pass proxy settings to BuildKit build containers via --build-arg.
+    # Docker BuildKit treats HTTP_PROXY, HTTPS_PROXY, NO_PROXY (and lowercase)
+    # as predefined ARGs: available in every RUN instruction without ARG declaration,
+    # and NOT baked into image layers/history. Without this, APK/curl inside build
+    # stages have no proxy and can't reach external repos (firewall blocks direct).
     - |
       docker buildx build \
         --platform "${PLATFORMS}" \
         --provenance=mode=max \
         --sbom=true \
+        --build-arg http_proxy="${http_proxy:-}" \
+        --build-arg https_proxy="${https_proxy:-}" \
+        --build-arg HTTP_PROXY="${HTTP_PROXY:-}" \
+        --build-arg HTTPS_PROXY="${HTTPS_PROXY:-}" \
+        --build-arg no_proxy="${no_proxy:-}" \
+        --build-arg NO_PROXY="${NO_PROXY:-}" \
         --secret id=ca-certs,src=/etc/ssl/certs/ca-certificates.crt \
         --label "org.opencontainers.image.source=${CI_PROJECT_URL}" \
         --label "org.opencontainers.image.revision=${CI_COMMIT_SHA}" \
