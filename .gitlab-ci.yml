@@ -75,18 +75,18 @@ shellcheck:
         EXTRA_TAGS="-t ${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:latest"
       fi
     - |
-      docker buildx build \\
-        --platform "${PLATFORMS}" \\
-        --provenance=mode=max \\
-        --sbom=true \\
-        --label "org.opencontainers.image.source=${CI_PROJECT_URL}" \\
-        --label "org.opencontainers.image.revision=${CI_COMMIT_SHA}" \\
-        --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \\
-        --cache-from type=registry,ref=${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:buildcache \\
-        --cache-to   type=registry,ref=${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:buildcache,mode=max \\
-        -t ${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:${TAG} \\
-        ${EXTRA_TAGS} \\
-        --push \\
+      docker buildx build \
+        --platform "${PLATFORMS}" \
+        --provenance=mode=max \
+        --sbom=true \
+        --label "org.opencontainers.image.source=${CI_PROJECT_URL}" \
+        --label "org.opencontainers.image.revision=${CI_COMMIT_SHA}" \
+        --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --cache-from type=registry,ref=${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:buildcache \
+        --cache-to   type=registry,ref=${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:buildcache,mode=max \
+        -t ${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:${TAG} \
+        ${EXTRA_TAGS} \
+        --push \
         ./${BUILD_CONTEXT}
     - docker buildx imagetools inspect ${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:${TAG} | tee image-digest-${IMAGE_NAME}.txt
   artifacts:
