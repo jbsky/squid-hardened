@@ -17,8 +17,8 @@ ENV CFLAGS="-O2 -fstack-protector-strong -fPIE -D_FORTIFY_SOURCE=2" \
     LDFLAGS="-Wl,-z,relro,-z,now,-z,noexecstack -pie"
 
 RUN --mount=type=secret,id=ca-certs \
-    SSL_CERT_FILE=/run/secrets/ca-certs \
-    apk add --no-cache \
+    cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt \
+ && apk add --no-cache \
         build-base autoconf automake libtool pkgconf \
         clamav-dev \
         curl-dev \
@@ -32,8 +32,8 @@ WORKDIR /src
 
 # Téléchargement c-icap depuis SourceForge (miroir HTTPS)
 RUN --mount=type=secret,id=ca-certs \
-    SSL_CERT_FILE=/run/secrets/ca-certs \
-    curl -fsSL "https://sourceforge.net/projects/c-icap/files/c-icap/0.5.x/c_icap-${CICAP_VERSION}.tar.gz/download" -o c-icap.tar.gz \
+    cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt \
+ && curl -fsSL "https://sourceforge.net/projects/c-icap/files/c-icap/0.5.x/c_icap-${CICAP_VERSION}.tar.gz/download" -o c-icap.tar.gz \
  && tar -xzf c-icap.tar.gz \
  && mv "c_icap-${CICAP_VERSION}" c-icap
 
@@ -50,8 +50,8 @@ RUN ./configure \
 # squidclamav
 WORKDIR /src
 RUN --mount=type=secret,id=ca-certs \
-    SSL_CERT_FILE=/run/secrets/ca-certs \
-    curl -fsSL "https://github.com/darold/squidclamav/archive/refs/tags/v${SQUIDCLAMAV_VERSION}.tar.gz" -o sc.tar.gz \
+    cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt \
+ && curl -fsSL "https://github.com/darold/squidclamav/archive/refs/tags/v${SQUIDCLAMAV_VERSION}.tar.gz" -o sc.tar.gz \
  && tar -xzf sc.tar.gz \
  && mv "squidclamav-${SQUIDCLAMAV_VERSION}" squidclamav
 
@@ -83,8 +83,8 @@ LABEL org.opencontainers.image.title="c-icap-hardened" \
       org.opencontainers.image.licenses="LGPL-2.1-or-later"
 
 RUN --mount=type=secret,id=ca-certs \
-    SSL_CERT_FILE=/run/secrets/ca-certs \
-    apk add --no-cache \
+    cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt \
+ && apk add --no-cache \
         clamav-libs \
         libcurl \
         zlib bzip2 \

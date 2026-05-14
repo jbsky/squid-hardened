@@ -22,9 +22,12 @@ ENV CFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIE -D_FORTI
     CXXFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIE -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security" \
     LDFLAGS="-Wl,-z,relro,-z,now,-z,noexecstack -pie"
 
+# Inject homelab CA into the trust store before any network access.
+# The SSL-bumping proxy re-signs all TLS certs with this CA; without it,
+# apk/curl fail after ~4 min when the proxy's cached bump-cert expires.
 RUN --mount=type=secret,id=ca-certs \
-    SSL_CERT_FILE=/run/secrets/ca-certs \
-    apk add --no-cache \
+    cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt \
+ && apk add --no-cache \
         build-base \
         autoconf automake libtool pkgconf \
         openssl-dev openssl \
@@ -42,8 +45,8 @@ WORKDIR /src
 
 # Téléchargement (HTTPS + verif via openssl)
 RUN --mount=type=secret,id=ca-certs \
-    SSL_CERT_FILE=/run/secrets/ca-certs \
-    curl -fsSL "https://www.squid-cache.org/Versions/v6/squid-${SQUID_VERSION}.tar.xz" -o squid.tar.xz \
+    cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt \
+ && curl -fsSL "https://www.squid-cache.org/Versions/v6/squid-${SQUID_VERSION}.tar.xz" -o squid.tar.xz \
  && curl -fsSL "https://www.squid-cache.org/Versions/v6/squid-${SQUID_VERSION}.tar.xz.asc" -o squid.tar.xz.asc \
  && tar -xJf squid.tar.xz \
  && mv "squid-${SQUID_VERSION}" squid
@@ -123,8 +126,8 @@ LABEL org.opencontainers.image.title="squid-hardened" \
 
 # Dépendances strictement runtime + tini comme PID 1
 RUN --mount=type=secret,id=ca-certs \
-    SSL_CERT_FILE=/run/secrets/ca-certs \
-    apk add --no-cache \
+    cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt \
+ && apk add --no-cache \
         libstdc++ \
         openssl \
         ca-certificates \

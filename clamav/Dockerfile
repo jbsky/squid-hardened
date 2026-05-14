@@ -15,8 +15,8 @@ ARG ALPINE_VERSION=3.20
 FROM alpine:${ALPINE_VERSION} AS builder
 
 RUN --mount=type=secret,id=ca-certs \
-    SSL_CERT_FILE=/run/secrets/ca-certs \
-    apk add --no-cache \
+    cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt \
+ && apk add --no-cache \
         clamav \
         clamav-libunrar \
         tini \
