@@ -166,7 +166,7 @@ func setupDirs() error {
 		{"/var/log/squid", 0755, squidUID, squidGID},
 		{"/var/spool/squid", 0755, squidUID, squidGID},
 		{"/var/lib/ssl_db", 0750, squidUID, squidGID},
-		{"/run", 0755, 0, 0},
+		{"/run", 0755, squidUID, squidGID},
 		{"/etc/squid/ssl_cert", 0755, squidUID, squidGID},
 		{"/tmp", 01777, 0, 0},
 	}
