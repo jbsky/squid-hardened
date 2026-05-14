@@ -244,7 +244,7 @@ jobs:
 
       # 5) Scan Trivy + upload SARIF
       - name: Trivy scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}@${{ steps.build.outputs.digest }}
           format: sarif
@@ -365,7 +365,7 @@ jobs:
           cosign sign --yes "${IMAGE}@${DIGEST}"
 
       - name: Trivy scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}@${{ steps.build.outputs.digest }}
           format: sarif
