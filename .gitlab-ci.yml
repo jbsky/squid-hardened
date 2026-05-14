@@ -156,7 +156,9 @@ build:clamav:
 # ---------- SIGN (cosign keyless via OIDC GitLab) -------------------
 .sign-template: &sign-template
   stage: sign
-  image: gcr.io/projectsigstore/cosign:latest
+  image:
+    name: gcr.io/projectsigstore/cosign:latest
+    entrypoint: [""]
   before_script: []
   services: []
   id_tokens:
@@ -187,7 +189,9 @@ sign:clamav:
 # ---------- SCAN ----------------------------------------------------
 .scan-template: &scan-template
   stage: scan
-  image: aquasec/trivy:latest
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
   before_script: []
   services: []
   script:
