@@ -178,12 +178,7 @@ build:clamav:
     SIGSTORE_ID_TOKEN:
       aud: sigstore
   script:
-    # Install cosign from GitHub releases (goes through proxy; CA cert is
-    # mounted by the runner at /etc/ssl/certs/ca-certificates.crt).
-    - apk add --no-cache curl
-    - COSIGN_VERSION=$(curl -fsSL https://api.github.com/repos/sigstore/cosign/releases/latest | grep -o '"tag_name":"[^"]*"' | cut -d'"' -f4)
-    - curl -fsSL -o /usr/local/bin/cosign "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
-    - chmod +x /usr/local/bin/cosign
+    - apk add --no-cache cosign
     - DIGEST=$(grep -o 'sha256:[a-f0-9]*' image-digest-${IMAGE_NAME}.txt | head -1)
     - cosign sign --yes ${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}@${DIGEST}
   allow_failure: true
