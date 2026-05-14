@@ -19,6 +19,47 @@ import (
 	"time"
 )
 
+// diagVolume logs ownership, permissions and contents of a directory.
+// Helps diagnose bind-mount issues (sgid, uid mismatch, etc.).
+func diagVolume(path string) {
+	fmt.Printf("[init][diag] process uid=%d gid=%d\n", os.Getuid(), os.Getgid())
+	info, err := os.Stat(path)
+	if err != nil {
+		fmt.Printf("[init][diag] stat %s: %v\n", path, err)
+		return
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if ok {
+		fmt.Printf("[init][diag] stat %s: mode=%04o uid=%d gid=%d\n", path, info.Mode().Perm()|os.FileMode(stat.Mode&0xFFFFF000>>12<<12), stat.Uid, stat.Gid)
+	} else {
+		fmt.Printf("[init][diag] stat %s: mode=%s (no syscall info)\n", path, info.Mode())
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		fmt.Printf("[init][diag] readdir %s: %v\n", path, err)
+		return
+	}
+	fmt.Printf("[init][diag] readdir %s: %d entries\n", path, len(entries))
+	for _, e := range entries {
+		ei, _ := e.Info()
+		if ei != nil {
+			fmt.Printf("[init][diag]   %s (size=%d mode=%s)\n", e.Name(), ei.Size(), ei.Mode())
+		} else {
+			fmt.Printf("[init][diag]   %s\n", e.Name())
+		}
+	}
+	// write-test
+	tmp, err := os.CreateTemp(path, ".diag-write-test-*")
+	if err != nil {
+		fmt.Printf("[init][diag] write-test %s: FAILED: %v\n", path, err)
+		return
+	}
+	name := tmp.Name()
+	tmp.Close()
+	os.Remove(name)
+	fmt.Printf("[init][diag] write-test %s: OK\n", path)
+}
+
 const (
 	clamavUID = 4000
 	clamavGID = 4000
@@ -105,6 +146,7 @@ func entrypoint() error {
 	freshclamConf := "/etc/clamav/freshclam.conf"
 
 	// 1) Initial signature download if DB is empty
+	diagVolume(dbDir)
 	if !hasSignatures(dbDir) {
 		fmt.Println("[init] Téléchargement initial des signatures (peut prendre plusieurs minutes)...")
 		cmd := exec.Command("freshclam",
@@ -140,11 +182,18 @@ func entrypoint() error {
 // hasSignatures checks for .cvd or .cld files in the DB directory.
 func hasSignatures(dir string) bool {
 	for _, ext := range []string{"*.cvd", "*.cld"} {
-		matches, _ := filepath.Glob(filepath.Join(dir, ext))
+		pattern := filepath.Join(dir, ext)
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[init][WARN] glob %s: %v\n", pattern, err)
+			continue
+		}
 		if len(matches) > 0 {
+			fmt.Printf("[init] found signatures: %v\n", matches)
 			return true
 		}
 	}
+	fmt.Println("[init] no signatures found in", dir)
 	return false
 }
 

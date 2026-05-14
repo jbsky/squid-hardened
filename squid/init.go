@@ -19,6 +19,47 @@ import (
 	"time"
 )
 
+// diagVolume logs ownership, permissions and contents of a directory.
+// Helps diagnose bind-mount issues (sgid, uid mismatch, etc.).
+func diagVolume(path string) {
+	fmt.Printf("[init][diag] process uid=%d gid=%d\n", os.Getuid(), os.Getgid())
+	info, err := os.Stat(path)
+	if err != nil {
+		fmt.Printf("[init][diag] stat %s: %v\n", path, err)
+		return
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if ok {
+		fmt.Printf("[init][diag] stat %s: mode=%04o uid=%d gid=%d\n", path, info.Mode().Perm()|os.FileMode(stat.Mode&0xFFFFF000>>12<<12), stat.Uid, stat.Gid)
+	} else {
+		fmt.Printf("[init][diag] stat %s: mode=%s (no syscall info)\n", path, info.Mode())
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		fmt.Printf("[init][diag] readdir %s: %v\n", path, err)
+		return
+	}
+	fmt.Printf("[init][diag] readdir %s: %d entries\n", path, len(entries))
+	for _, e := range entries {
+		ei, _ := e.Info()
+		if ei != nil {
+			fmt.Printf("[init][diag]   %s (size=%d mode=%s)\n", e.Name(), ei.Size(), ei.Mode())
+		} else {
+			fmt.Printf("[init][diag]   %s\n", e.Name())
+		}
+	}
+	// write-test
+	tmp, err := os.CreateTemp(path, ".diag-write-test-*")
+	if err != nil {
+		fmt.Printf("[init][diag] write-test %s: FAILED: %v\n", path, err)
+		return
+	}
+	name := tmp.Name()
+	tmp.Close()
+	os.Remove(name)
+	fmt.Printf("[init][diag] write-test %s: OK\n", path)
+}
+
 const (
 	squidUID = 3128
 	squidGID = 3128
@@ -111,14 +152,20 @@ func entrypoint() error {
 	}
 
 	// 1) SSL Bump init
-	confData, _ := os.ReadFile(conf)
+	confData, err := os.ReadFile(conf)
+	if err != nil {
+		return fmt.Errorf("read config %s: %w", conf, err)
+	}
 	confStr := string(confData)
 
 	if strings.Contains(confStr, "sslcrtd_program") || strings.Contains(confStr, "ssl_bump") {
 		sslDB := "/var/lib/ssl_db/db"
+		diagVolume("/var/lib/ssl_db")
 		if !exists(sslDB + "/index.txt") {
 			log("Initialisation de la DB SSL dans %s", sslDB)
-			_ = os.RemoveAll(sslDB)
+			if err := os.RemoveAll(sslDB); err != nil {
+				warn("RemoveAll %s: %v", sslDB, err)
+			}
 			if err := run("/usr/lib/squid/security_file_certgen", "-c", "-s", sslDB, "-M", "20MB"); err != nil {
 				return fmt.Errorf("security_file_certgen: %w", err)
 			}
