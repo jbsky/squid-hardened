@@ -18,6 +18,10 @@ variables:
   IMAGE_NAMESPACE: $CI_PROJECT_PATH
   COSIGN_EXPERIMENTAL: "1"
   PLATFORMS: "linux/amd64"   # arm64 disabled: proxy 240s timeout kills multi-arch builds
+  # Domain suffix for BuildKit no_proxy. MUST be a single value (no commas)
+  # because --driver-opt uses pflag CSV parser that splits on commas.
+  # Override via CI/CD variable if your internal domain differs.
+  NO_PROXY_DOMAIN: ".home.arpa"
 
 default:
   image: docker:27
@@ -89,11 +93,14 @@ shellcheck:
     # a separate container that doesn't inherit the build container's env).
     # network=host shares dind's network stack (DNS, /etc/hosts).
     # no_proxy excludes local services (GitLab registry) from proxying.
-    # ADAPT: set to your internal domain suffix (e.g., .corp, .lan).
-    # Uses domain suffix (no commas) to avoid pflag splitting.
+    # ADAPT: set NO_PROXY_DOMAIN to your internal domain suffix.
+    # CRITICAL: --driver-opt uses pflag CSV parser — commas in values are
+    # treated as field separators, so $no_proxy (comma-separated) CANNOT be
+    # passed directly. We use a single domain suffix instead.
     # Without this, BuildKit proxies CONNECT to :5050, which Squid blocks
     # (only port 443 is in SSL_ports → Forbidden).
     - |
+      NO_PROXY_DOMAIN="${NO_PROXY_DOMAIN:-.home.arpa}"
       docker buildx create --use --name builder \
         --config /tmp/buildkit/buildkitd.toml \
         --driver-opt network=host \
@@ -101,8 +108,8 @@ shellcheck:
         --driver-opt "env.https_proxy=${https_proxy:-}" \
         --driver-opt "env.HTTP_PROXY=${HTTP_PROXY:-}" \
         --driver-opt "env.HTTPS_PROXY=${HTTPS_PROXY:-}" \
-        --driver-opt "env.no_proxy=${no_proxy:-.internal}" \
-        --driver-opt "env.NO_PROXY=${NO_PROXY:-.internal}" \
+        --driver-opt "env.no_proxy=${NO_PROXY_DOMAIN}" \
+        --driver-opt "env.NO_PROXY=${NO_PROXY_DOMAIN}" \
         tls-ctx
     # Calcul du tag
     - |
