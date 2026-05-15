@@ -9,8 +9,8 @@
 #   - filesystem read-only friendly
 # =====================================================================
 
-ARG SQUID_VERSION=6.10
-ARG ALPINE_VERSION=3.20
+ARG SQUID_VERSION=7.5
+ARG ALPINE_VERSION=3.21
 
 # ---------- Stage 1 : builder ----------------------------------------
 FROM alpine:${ALPINE_VERSION} AS builder
@@ -55,17 +55,21 @@ RUN apk add \
 
 WORKDIR /src
 
-# Téléchargement (HTTPS + verif via openssl)
+# Download from GitHub releases (squid-cache.org no longer hosts v7+ tarballs)
+# Tag format: SQUID_7_5 (dots replaced by underscores)
 RUN --mount=type=secret,id=ca-certs,required=false \
     [ -f /run/secrets/ca-certs ] && cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt || true \
- && curl -fsSL "https://www.squid-cache.org/Versions/v6/squid-${SQUID_VERSION}.tar.xz" -o squid.tar.xz \
- && curl -fsSL "https://www.squid-cache.org/Versions/v6/squid-${SQUID_VERSION}.tar.xz.asc" -o squid.tar.xz.asc \
+ && SQUID_TAG="SQUID_$(echo "${SQUID_VERSION}" | tr '.' '_')" \
+ && curl -fsSL "https://github.com/squid-cache/squid/releases/download/${SQUID_TAG}/squid-${SQUID_VERSION}.tar.xz" -o squid.tar.xz \
+ && curl -fsSL "https://github.com/squid-cache/squid/releases/download/${SQUID_TAG}/squid-${SQUID_VERSION}.tar.xz.asc" -o squid.tar.xz.asc \
  && tar -xJf squid.tar.xz \
  && mv "squid-${SQUID_VERSION}" squid
 
 WORKDIR /src/squid
 
-# Configuration avec SSL bump + ICAP + ESI (ICAP indispensable pour C-ICAP/ClamAV)
+# Configuration avec SSL bump + ICAP (ICAP indispensable pour C-ICAP/ClamAV)
+# Squid 7 removed: --enable-async-io, --enable-cachemgr-hostname, ESI support
+# DiskIO modules auto-detected; storeio modules explicitly listed
 RUN ./configure \
         --prefix=/usr \
         --sysconfdir=/etc/squid \
@@ -81,12 +85,10 @@ RUN ./configure \
         --enable-ssl-crtd \
         --enable-icap-client \
         --enable-linux-netfilter \
-        --enable-async-io \
         --enable-storeio="ufs,aufs,diskd,rock" \
         --enable-removal-policies="heap,lru" \
         --enable-htcp \
         --enable-cache-digests \
-        --enable-cachemgr-hostname=localhost \
         --enable-delay-pools \
         --enable-x-accelerator-vary \
         --enable-eui \
@@ -154,7 +156,7 @@ RUN rm -rf /lib/apk /lib/libapk* /var/cache/apk /etc/apk /sbin/apk
 FROM scratch
 
 LABEL org.opencontainers.image.title="squid-hardened" \
-      org.opencontainers.image.description="Squid 6 FROM scratch — SSL Bump + ICAP, non-root, zero shell" \
+      org.opencontainers.image.description="Squid 7 FROM scratch — SSL Bump + ICAP, non-root, zero shell" \
       org.opencontainers.image.vendor="jbsky" \
       org.opencontainers.image.licenses="GPL-2.0-or-later" \
       org.opencontainers.image.source="https://github.com/jbsky/squid-hardened"

@@ -4,7 +4,7 @@
 #  No compilation needed (apk packages), so builder IS the prep stage.
 # =====================================================================
 
-ARG ALPINE_VERSION=3.20
+ARG ALPINE_VERSION=3.21
 
 # ---------- Stage 1 : builder (install + prepare filesystem) ---------
 FROM alpine:${ALPINE_VERSION} AS builder

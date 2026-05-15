@@ -18,8 +18,8 @@ name: c-icap hardened
 image: docker.io/jbsky/c-icap-hardened
 variant: runtime
 tags:
-  - "0.5"
-  - "0.5.13"
+  - "0.6"
+  - "0.6.4"
 platforms:
   - linux/amd64
   - linux/arm64
@@ -74,12 +74,12 @@ contents:
         - name: compile-c-icap
           runs: |
             set -eux -o pipefail
-            CICAP_VERSION="0.5.13"
+            CICAP_VERSION="0.6.4"
             mkdir -p /src && cd /src
 
             echo "→ Téléchargement c-icap ${CICAP_VERSION}"
             curl -fsSL \
-              "https://sourceforge.net/projects/c-icap/files/c-icap/0.5.x/c_icap-${CICAP_VERSION}.tar.gz/download" \
+              "https://sourceforge.net/projects/c-icap/files/c-icap/0.6.x/c_icap-${CICAP_VERSION}.tar.gz/download" \
               -o cicap.tar.gz
             tar -xzf cicap.tar.gz
             mv "c_icap-${CICAP_VERSION}" cicap
@@ -100,7 +100,7 @@ contents:
         - name: compile-squidclamav
           runs: |
             set -eux -o pipefail
-            SC_VERSION="7.3"
+            SC_VERSION="7.4"
             mkdir -p /src && cd /src
 
             echo "→ Téléchargement squidclamav ${SC_VERSION}"
@@ -280,5 +280,5 @@ os-release:
   bug-report-url: https://github.com/jbsky/squid-hardened/issues
 
 annotations:
-  org.opencontainers.image.description: c-icap 0.5.13 + squidclamav 7.3, compilés depuis les sources, DHI hardened, non-root
+  org.opencontainers.image.description: c-icap 0.6.4 + squidclamav 7.4, compilés depuis les sources, DHI hardened, non-root
   org.opencontainers.image.licenses: LGPL-2.1-or-later
