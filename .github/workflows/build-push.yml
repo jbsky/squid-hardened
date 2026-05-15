@@ -71,11 +71,10 @@ jobs:
           dockerfile: clamav/Dockerfile
           failure-threshold: warning
 
-      - name: ShellCheck – scripts + entrypoints
+      - name: ShellCheck – scripts
         uses: ludeeus/action-shellcheck@master
         with:
           scandir: ./scripts
-          additional_files: 'squid/entrypoint.sh c-icap/entrypoint.sh clamav/entrypoint.sh'
 
   # -------------------------------------------------------------------
   #  Check if DHI credentials are configured

@@ -16,6 +16,7 @@ ARG ALPINE_VERSION=3.21
 FROM alpine:${ALPINE_VERSION} AS builder
 
 ARG SQUID_VERSION
+SHELL ["/bin/ash", "-eo", "pipefail", "-c"]
 ENV CFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIE -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security" \
     CXXFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIE -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security" \
     LDFLAGS="-Wl,-z,relro,-z,now,-z,noexecstack -pie"
@@ -26,39 +27,36 @@ ENV CFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIE -D_FORTI
 
 # 1/3  Inject CA + switch to HTTP repos + core build toolchain
 RUN --mount=type=secret,id=ca-certs,required=false \
-    [ -f /run/secrets/ca-certs ] && cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt || true \
+    if [ -f /run/secrets/ca-certs ]; then cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt; fi \
  && sed -i 's|https://|http://|g' /etc/apk/repositories \
- && apk add \
+ && apk add --no-cache \
         build-base \
         autoconf automake libtool pkgconf \
         linux-headers \
-        perl \
- && rm -rf /var/cache/apk/*
+        perl
 
 # 2/3  Crypto / security libraries
-RUN apk add \
+RUN apk add --no-cache \
         openssl-dev openssl \
         libcap-dev libcap \
         krb5-dev \
-        nettle-dev gnutls-dev \
- && rm -rf /var/cache/apk/*
+        nettle-dev gnutls-dev
 
 # 3/3  XML, network, test, LDAP libs + download tools
-RUN apk add \
+RUN apk add --no-cache \
         libxml2-dev \
         libnetfilter_conntrack-dev \
         cppunit-dev \
         openldap-dev \
         curl xz \
-        ca-certificates \
- && rm -rf /var/cache/apk/*
+        ca-certificates
 
 WORKDIR /src
 
 # Download from GitHub releases (squid-cache.org no longer hosts v7+ tarballs)
 # Tag format: SQUID_7_5 (dots replaced by underscores)
 RUN --mount=type=secret,id=ca-certs,required=false \
-    [ -f /run/secrets/ca-certs ] && cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt || true \
+    if [ -f /run/secrets/ca-certs ]; then cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt; fi \
  && SQUID_TAG="SQUID_$(echo "${SQUID_VERSION}" | tr '.' '_')" \
  && curl -fsSL "https://github.com/squid-cache/squid/releases/download/${SQUID_TAG}/squid-${SQUID_VERSION}.tar.xz" -o squid.tar.xz \
  && curl -fsSL "https://github.com/squid-cache/squid/releases/download/${SQUID_TAG}/squid-${SQUID_VERSION}.tar.xz.asc" -o squid.tar.xz.asc \
@@ -106,8 +104,11 @@ RUN ./configure \
         --disable-strict-error-checking
 
 RUN make -j"$(nproc)" \
- && make install DESTDIR=/out \
- && strip /out/usr/sbin/squid \
+ && make install DESTDIR=/out
+
+# Strip binaries (|| true: cert helpers may not exist for all build configs)
+# hadolint ignore=SC2046
+RUN strip /out/usr/sbin/squid \
           /out/usr/lib/squid/*-cert.d || true
 
 # Remove /out/var/run (conflicts with /run symlink) + copy mime.conf
