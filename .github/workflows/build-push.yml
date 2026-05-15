@@ -309,12 +309,15 @@ jobs:
           - name: clamav-hardened
             dockerfile: clamav/Dockerfile
             context: clamav/
+            prep-target: builder
           - name: squid-hardened
             dockerfile: squid/Dockerfile
             context: squid/
+            prep-target: prep
           - name: c-icap-hardened
             dockerfile: c-icap/Dockerfile
             context: c-icap/
+            prep-target: prep
 
     steps:
       - uses: actions/checkout@v4
@@ -359,6 +362,36 @@ jobs:
           echo "$IMAGES" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
 
+      # Scan the Alpine prep stage (has OS metadata) to catch CVEs in
+      # shared libraries that Trivy cannot see in the FROM scratch image.
+      - name: Build prep stage (Alpine with runtime deps)
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.dockerfile }}
+          target: ${{ matrix.image.prep-target }}
+          platforms: linux/amd64
+          load: true
+          tags: ${{ matrix.image.name }}-prep:scan
+          cache-from: type=gha,scope=${{ matrix.image.name }}
+
+      - name: Trivy scan prep stage (Alpine CVEs)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ matrix.image.name }}-prep:scan
+          format: sarif
+          output: trivy-${{ matrix.image.name }}-deps.sarif
+          severity: CRITICAL,HIGH
+          exit-code: '0'
+          ignore-unfixed: true
+
+      - name: Upload prep SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-${{ matrix.image.name }}-deps.sarif
+          category: ${{ matrix.image.name }}-deps
+
       - name: Extract metadata (tags + labels OCI)
         id: meta
         uses: docker/metadata-action@v6
@@ -375,6 +408,7 @@ jobs:
           file: ${{ matrix.image.dockerfile }}
           platforms: linux/amd64,linux/arm64
           push: true
+          sbom: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           provenance: mode=max

@@ -148,7 +148,7 @@ RUN apk add --no-cache \
 COPY --from=builder /out/ /
 
 # Strip APK/package-manager artifacts (not needed in final image)
-RUN rm -rf /lib/apk /var/cache/apk /etc/apk /sbin/apk
+RUN rm -rf /lib/apk /lib/libapk* /var/cache/apk /etc/apk /sbin/apk
 
 # ---------- Stage 4 : FROM scratch (final hardened image) -----------
 FROM scratch
