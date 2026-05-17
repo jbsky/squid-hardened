@@ -350,8 +350,24 @@ jobs:
           IMAGE="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}"
           cosign sign --yes "${IMAGE}@${{ steps.manifest.outputs.digest }}"
 
+      - name: Detect scan platform
+        id: scan-platform
+        run: |
+          IMAGE="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}"
+          VERSION="${{ steps.upstream.outputs.version }}"
+          # Prefer amd64 (runner-native), fall back to first available
+          PLATFORM=$(docker buildx imagetools inspect "${IMAGE}:${VERSION}" \
+            --format '{{range .Manifest.Manifests}}{{if eq .Platform.Architecture "amd64"}}linux/amd64{{end}}{{end}}')
+          if [ -z "$PLATFORM" ]; then
+            PLATFORM=$(docker buildx imagetools inspect "${IMAGE}:${VERSION}" \
+              --format '{{with index .Manifest.Manifests 0}}{{.Platform.OS}}/{{.Platform.Architecture}}{{end}}')
+          fi
+          echo "platform=${PLATFORM}" >> "$GITHUB_OUTPUT"
+
       - name: Trivy scan
         uses: aquasecurity/trivy-action@v0.36.0
+        env:
+          TRIVY_PLATFORM: ${{ steps.scan-platform.outputs.platform }}
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}@${{ steps.manifest.outputs.digest }}
           format: sarif
@@ -606,8 +622,24 @@ jobs:
           IMAGE="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}"
           cosign sign --yes "${IMAGE}@${{ steps.manifest.outputs.digest }}"
 
+      - name: Detect scan platform
+        id: scan-platform
+        run: |
+          IMAGE="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}"
+          VERSION="${{ steps.upstream.outputs.version }}"
+          # Prefer amd64 (runner-native), fall back to first available
+          PLATFORM=$(docker buildx imagetools inspect "${IMAGE}:${VERSION}" \
+            --format '{{range .Manifest.Manifests}}{{if eq .Platform.Architecture "amd64"}}linux/amd64{{end}}{{end}}')
+          if [ -z "$PLATFORM" ]; then
+            PLATFORM=$(docker buildx imagetools inspect "${IMAGE}:${VERSION}" \
+              --format '{{with index .Manifest.Manifests 0}}{{.Platform.OS}}/{{.Platform.Architecture}}{{end}}')
+          fi
+          echo "platform=${PLATFORM}" >> "$GITHUB_OUTPUT"
+
       - name: Trivy scan
         uses: aquasecurity/trivy-action@v0.36.0
+        env:
+          TRIVY_PLATFORM: ${{ steps.scan-platform.outputs.platform }}
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}@${{ steps.manifest.outputs.digest }}
           format: sarif
