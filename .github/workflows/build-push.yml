@@ -10,8 +10,10 @@
 #       Fallback si DHI indisponible ou pour validation en PR.
 #       Pas besoin de docker login dhi.io.
 #
-#  La CI pousse UNIQUEMENT les images DHI (build-dhi) sur ghcr.io.
-#  Les Dockerfiles servent à la validation de syntaxe et aux tests locaux.
+#  Architecture multi-arch :
+#    - Chaque plateforme (amd64, arm64) est un job séparé en parallèle
+#    - Les digests sont uploadés en artifacts
+#    - Un job merge crée le manifest multi-arch + signe + scanne
 # =====================================================================
 name: build-push
 
@@ -35,12 +37,13 @@ on:
   workflow_dispatch:
     inputs:
       platforms:
-        description: 'Target platforms (default: linux/amd64)'
+        description: 'Target platforms'
         required: false
         default: 'linux/amd64'
         type: choice
         options:
           - 'linux/amd64'
+          - 'linux/arm64'
           - 'linux/amd64,linux/arm64'
 
 env:
@@ -108,6 +111,22 @@ jobs:
           fi
 
   # -------------------------------------------------------------------
+  #  Compute platform matrix from workflow input
+  # -------------------------------------------------------------------
+  compute-platforms:
+    name: Compute platforms
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - id: set
+        run: |
+          PLATFORMS="${{ inputs.platforms || 'linux/amd64' }}"
+          # Convert comma-separated string to JSON array
+          MATRIX=$(echo "$PLATFORMS" | jq -Rc 'split(",")')
+          echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
+
+  # -------------------------------------------------------------------
   #  Validation YAML DHI (parse-check avant le vrai build)
   #  Skipped if DHI credentials are not configured
   # -------------------------------------------------------------------
@@ -160,12 +179,12 @@ jobs:
             --load
 
   # -------------------------------------------------------------------
-  #  Build + Push DHI → ghcr.io (multi-arch, signé, SBOM attaché)
+  #  Build + Push DHI → ghcr.io (per-platform, push by digest)
   #  Skipped if DHI credentials are not configured
   # -------------------------------------------------------------------
   build-dhi:
-    name: DHI – ${{ matrix.image.name }}
-    needs: [check-dhi, validate-dhi]
+    name: DHI – ${{ matrix.image.name }} (${{ matrix.platform }})
+    needs: [check-dhi, validate-dhi, compute-platforms]
     runs-on: ubuntu-latest
     if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && needs.check-dhi.outputs.has-dhi == 'true'
     strategy:
@@ -184,12 +203,13 @@ jobs:
             definition: c-icap/c-icap.yaml
             context: c-icap/
             version_key: c-icap
+        platform: ${{ fromJson(needs.compute-platforms.outputs.matrix) }}
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up QEMU
-        if: contains(inputs.platforms || 'linux/amd64', 'arm64')
+        if: matrix.platform != 'linux/amd64'
         uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64
@@ -199,8 +219,6 @@ jobs:
         with:
           driver-opts: image=moby/buildkit:latest
 
-      # 1) Login dhi.io – requis pour que BuildKit pull le frontend DHI
-      #    (# syntax=dhi.io/build:2-alpine3.23 en tête du YAML)
       - name: Login dhi.io (frontend DHI)
         uses: docker/login-action@v3
         with:
@@ -208,7 +226,6 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
 
-      # 2) Login ghcr.io – pour push de l'image produite
       - name: Login ghcr.io (registry cible)
         uses: docker/login-action@v3
         with:
@@ -216,66 +233,127 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Read upstream version from versions.json
+      - name: Build & Push by digest (DHI)
+        id: build
+        run: |
+          docker buildx build ${{ matrix.image.context }} \
+            -f ${{ matrix.image.definition }} \
+            --platform ${{ matrix.platform }} \
+            --sbom=generator=dhi.io/scout-sbom-indexer:1 \
+            --provenance=mode=max \
+            --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
+            --label "org.opencontainers.image.revision=${{ github.sha }}" \
+            --output "type=image,name=${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }},push-by-digest=true,name-canonical=true,push=true" \
+            --cache-from type=gha,scope=${{ matrix.image.name }}-${{ matrix.platform }} \
+            --cache-to   type=gha,mode=max,scope=${{ matrix.image.name }}-${{ matrix.platform }} \
+            --metadata-file /tmp/meta.json
+
+          DIGEST=$(jq -r '."containerimage.digest"' /tmp/meta.json)
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests/${{ matrix.image.name }}
+          DIGEST="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${{ matrix.image.name }}/${DIGEST#sha256:}"
+
+      - name: Compute platform slug
+        id: slug
+        run: echo "slug=${PLATFORM//\//-}" >> "$GITHUB_OUTPUT"
+        env:
+          PLATFORM: ${{ matrix.platform }}
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: dhi-digest-${{ matrix.image.name }}-${{ steps.slug.outputs.slug }}
+          path: /tmp/digests/${{ matrix.image.name }}
+          if-no-files-found: error
+          retention-days: 1
+
+  # -------------------------------------------------------------------
+  #  Merge DHI manifests + tag + sign + attest
+  # -------------------------------------------------------------------
+  merge-dhi:
+    name: Merge DHI – ${{ matrix.image.name }}
+    needs: [build-dhi, check-dhi]
+    if: needs.build-dhi.result == 'success'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image:
+          - name: clamav-hardened
+            version_key: clamav
+          - name: squid-hardened
+            version_key: squid
+          - name: c-icap-hardened
+            version_key: c-icap
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests/${{ matrix.image.name }}
+          pattern: dhi-digest-${{ matrix.image.name }}-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read upstream version
         id: upstream
         run: |
           VERSION=$(jq -r '."${{ matrix.image.version_key }}"' versions.json)
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Create manifest list and push
+        id: manifest
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.upstream.outputs.version }}"
           IMAGE="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}"
-          # Always tag with upstream version + latest
-          TAGS="${IMAGE}:${VERSION},${IMAGE}:latest"
-          # If triggered by a git tag, also add the semver tag
+
+          # Build tag flags
+          TAGS="-t ${IMAGE}:${VERSION} -t ${IMAGE}:latest"
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             GIT_VERSION="${GITHUB_REF_NAME#v}"
-            TAGS="${TAGS},${IMAGE}:${GIT_VERSION}"
+            TAGS="${TAGS} -t ${IMAGE}:${GIT_VERSION}"
           fi
-          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
 
-      # 3) Build DHI multi-arch + push
-      #    --sbom=generator=dhi.io/scout-sbom-indexer:1  → SBOM DHI natif
-      #    --provenance=mode=max                          → SLSA level 3
-      - name: Build & Push (DHI multi-arch)
-        id: build
-        run: |
-          # Convert comma-separated tags to --tag flags
-          TAG_FLAGS=$(echo "${{ steps.upstream.outputs.tags }}" | tr ',' '\n' | sed 's/^/--tag /' | tr '\n' ' ')
+          # Collect digests from artifacts
+          SOURCES=""
+          for f in /tmp/digests/${{ matrix.image.name }}/*; do
+            SOURCES="${SOURCES} ${IMAGE}@sha256:$(basename "$f")"
+          done
 
-          docker buildx build ${{ matrix.image.context }} \
-            -f ${{ matrix.image.definition }} \
-            --platform ${{ inputs.platforms || 'linux/amd64' }} \
-            --sbom=generator=dhi.io/scout-sbom-indexer:1 \
-            --provenance=mode=max \
-            ${TAG_FLAGS} \
-            --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
-            --label "org.opencontainers.image.revision=${{ github.sha }}" \
-            --label "org.opencontainers.image.version=${{ steps.upstream.outputs.version }}" \
-            --cache-from type=gha,scope=${{ matrix.image.name }} \
-            --cache-to   type=gha,mode=max,scope=${{ matrix.image.name }} \
-            --push \
-            --metadata-file /tmp/meta-${{ matrix.image.name }}.json
+          # Create and push multi-arch manifest
+          docker buildx imagetools create ${TAGS} ${SOURCES}
 
-          # Extraction du digest pour la signature
-          DIGEST=$(jq -r '."containerimage.digest"' /tmp/meta-${{ matrix.image.name }}.json)
+          # Get the manifest list digest
+          DIGEST=$(docker buildx imagetools inspect "${IMAGE}:${VERSION}" --format '{{json .Manifest}}' | jq -r '.digest')
           echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
 
-      # 4) Vérification cosign (l'image DHI est déjà signée par dhi.io)
-      #    On y ajoute une 2e signature keyless propre au repo CI
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
 
-      - name: Co-signature OIDC keyless (repo GitHub)
-        env:
-          DIGEST: ${{ steps.build.outputs.digest }}
+      - name: Sign manifest (OIDC keyless)
         run: |
           set -euo pipefail
           IMAGE="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}"
-          cosign sign --yes "${IMAGE}@${DIGEST}"
+          cosign sign --yes "${IMAGE}@${{ steps.manifest.outputs.digest }}"
 
-      # 5) Scan Trivy + upload SARIF
       - name: Trivy scan
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}@${{ steps.build.outputs.digest }}
+          image-ref: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}@${{ steps.manifest.outputs.digest }}
           format: sarif
           output: trivy-${{ matrix.image.name }}.sarif
           severity: CRITICAL,HIGH
@@ -289,39 +367,31 @@ jobs:
           sarif_file: trivy-${{ matrix.image.name }}.sarif
           category: dhi-${{ matrix.image.name }}
 
-      # 6) Attestation SLSA GitHub (Build Provenance)
       - name: GitHub SLSA Attestation
         if: "!startsWith(github.ref, 'refs/heads/dependabot/')"
         uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}
-          subject-digest: ${{ steps.build.outputs.digest }}
+          subject-digest: ${{ steps.manifest.outputs.digest }}
           push-to-registry: true
 
       - name: Summary
         run: |
           echo "### ${{ matrix.image.name }} (v${{ steps.upstream.outputs.version }})" >> $GITHUB_STEP_SUMMARY
-          echo "**Digest :** \`${{ steps.build.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Manifest digest :** \`${{ steps.manifest.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "# Pull (version tag)" >> $GITHUB_STEP_SUMMARY
           echo "docker pull ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}:${{ steps.upstream.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "# Pull (latest)" >> $GITHUB_STEP_SUMMARY
           echo "docker pull ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}:latest" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "# Vérifier signature" >> $GITHUB_STEP_SUMMARY
-          echo "cosign verify ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}@${{ steps.build.outputs.digest }} \\" >> $GITHUB_STEP_SUMMARY
-          echo "  --certificate-identity-regexp '^https://github.com/${{ github.repository }}/' \\" >> $GITHUB_STEP_SUMMARY
-          echo "  --certificate-oidc-issuer https://token.actions.githubusercontent.com" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
 
   # -------------------------------------------------------------------
-  #  Build + Push Dockerfiles → ghcr.io (fallback when DHI unavailable)
+  #  Build + Push Dockerfiles → ghcr.io (per-platform, push by digest)
+  #  Fallback when DHI unavailable
   # -------------------------------------------------------------------
   build-dockerfile:
-    name: Build – ${{ matrix.image.name }}
-    needs: check-dhi
+    name: Build – ${{ matrix.image.name }} (${{ matrix.platform }})
+    needs: [check-dhi, compute-platforms]
     runs-on: ubuntu-latest
     # Runs on main push or tags when DHI secrets are NOT available (fallback)
     if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && needs.check-dhi.outputs.has-dhi == 'false'
@@ -344,12 +414,13 @@ jobs:
             context: c-icap/
             prep-target: prep
             version_key: c-icap
+        platform: ${{ fromJson(needs.compute-platforms.outputs.matrix) }}
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up QEMU
-        if: contains(inputs.platforms || 'linux/amd64', 'arm64')
+        if: matrix.platform != 'linux/amd64'
         uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64
@@ -365,7 +436,6 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Login Docker Hub
-        id: dockerhub-login
         if: env.HAS_DOCKERHUB == 'true'
         uses: docker/login-action@v3
         env:
@@ -374,24 +444,9 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Compute image list
-        id: images
-        env:
-          HAS_DOCKERHUB: ${{ secrets.DOCKERHUB_TOKEN != '' }}
-          DOCKERHUB_NS: ${{ secrets.DOCKERHUB_USERNAME }}
-        run: |
-          IMAGES="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}"
-          if [ "$HAS_DOCKERHUB" = "true" ]; then
-            IMAGES="${IMAGES}
-          docker.io/${DOCKERHUB_NS}/${{ matrix.image.name }}"
-          fi
-          echo "list<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$IMAGES" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
-
-      # Scan the Alpine prep stage (has OS metadata) to catch CVEs in
-      # shared libraries that Trivy cannot see in the FROM scratch image.
+      # Scan the Alpine prep stage (amd64 only – can't --load cross-arch)
       - name: Build prep stage (Alpine with runtime deps)
+        if: matrix.platform == 'linux/amd64'
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.image.context }}
@@ -400,9 +455,10 @@ jobs:
           platforms: linux/amd64
           load: true
           tags: ${{ matrix.image.name }}-prep:scan
-          cache-from: type=gha,scope=${{ matrix.image.name }}
+          cache-from: type=gha,scope=${{ matrix.image.name }}-prep
 
       - name: Trivy scan prep stage (Alpine CVEs)
+        if: matrix.platform == 'linux/amd64'
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ matrix.image.name }}-prep:scan
@@ -413,71 +469,147 @@ jobs:
           ignore-unfixed: true
 
       - name: Upload prep SARIF
-        if: always()
+        if: matrix.platform == 'linux/amd64'
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-${{ matrix.image.name }}-deps.sarif
           category: ${{ matrix.image.name }}-deps
 
-      - name: Read upstream version from versions.json
-        id: upstream
-        run: |
-          VERSION=$(jq -r '."${{ matrix.image.version_key }}"' versions.json)
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-
-      - name: Compute image tags
-        id: tags
-        env:
-          HAS_DOCKERHUB: ${{ secrets.DOCKERHUB_TOKEN != '' }}
-          DOCKERHUB_NS: ${{ secrets.DOCKERHUB_USERNAME }}
-        run: |
-          VERSION="${{ steps.upstream.outputs.version }}"
-          IMAGE="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}"
-          TAGS="${IMAGE}:${VERSION},${IMAGE}:latest"
-          if [ "$HAS_DOCKERHUB" = "true" ]; then
-            TAGS="${TAGS},docker.io/${DOCKERHUB_NS}/${{ matrix.image.name }}:${VERSION}"
-            TAGS="${TAGS},docker.io/${DOCKERHUB_NS}/${{ matrix.image.name }}:latest"
-          fi
-          # If triggered by a git tag, also add semver tag
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            GIT_VERSION="${GITHUB_REF_NAME#v}"
-            TAGS="${TAGS},${IMAGE}:${GIT_VERSION}"
-          fi
-          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
-
-      - name: Build & Push
+      - name: Build & Push by digest
         id: build
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.image.context }}
           file: ${{ matrix.image.dockerfile }}
-          platforms: ${{ inputs.platforms || 'linux/amd64' }}
-          push: true
+          platforms: ${{ matrix.platform }}
           sbom: true
-          tags: ${{ steps.tags.outputs.tags }}
+          provenance: mode=max
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ steps.upstream.outputs.version }}
-          provenance: mode=max
-          cache-from: type=gha,scope=${{ matrix.image.name }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
+          outputs: type=image,"name=${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}",push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.image.name }}-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}-${{ matrix.platform }}
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests/${{ matrix.image.name }}
+          DIGEST="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${{ matrix.image.name }}/${DIGEST#sha256:}"
+
+      - name: Compute platform slug
+        id: slug
+        run: echo "slug=${PLATFORM//\//-}" >> "$GITHUB_OUTPUT"
+        env:
+          PLATFORM: ${{ matrix.platform }}
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.image.name }}-${{ steps.slug.outputs.slug }}
+          path: /tmp/digests/${{ matrix.image.name }}
+          if-no-files-found: error
+          retention-days: 1
+
+  # -------------------------------------------------------------------
+  #  Merge Dockerfile manifests + tag + sign + scan + attest
+  # -------------------------------------------------------------------
+  merge-dockerfile:
+    name: Merge – ${{ matrix.image.name }}
+    needs: [build-dockerfile, check-dhi]
+    if: needs.build-dockerfile.result == 'success'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image:
+          - name: clamav-hardened
+            version_key: clamav
+          - name: squid-hardened
+            version_key: squid
+          - name: c-icap-hardened
+            version_key: c-icap
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests/${{ matrix.image.name }}
+          pattern: digest-${{ matrix.image.name }}-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login Docker Hub
+        if: env.HAS_DOCKERHUB == 'true'
+        uses: docker/login-action@v3
+        env:
+          HAS_DOCKERHUB: ${{ secrets.DOCKERHUB_TOKEN != '' }}
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Read upstream version
+        id: upstream
+        run: |
+          VERSION=$(jq -r '."${{ matrix.image.version_key }}"' versions.json)
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Create manifest list and push
+        id: manifest
+        env:
+          HAS_DOCKERHUB: ${{ secrets.DOCKERHUB_TOKEN != '' }}
+          DOCKERHUB_NS: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.upstream.outputs.version }}"
+          IMAGE="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}"
+
+          # Build tag flags
+          TAGS="-t ${IMAGE}:${VERSION} -t ${IMAGE}:latest"
+          if [ "$HAS_DOCKERHUB" = "true" ]; then
+            TAGS="${TAGS} -t docker.io/${DOCKERHUB_NS}/${{ matrix.image.name }}:${VERSION}"
+            TAGS="${TAGS} -t docker.io/${DOCKERHUB_NS}/${{ matrix.image.name }}:latest"
+          fi
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            GIT_VERSION="${GITHUB_REF_NAME#v}"
+            TAGS="${TAGS} -t ${IMAGE}:${GIT_VERSION}"
+          fi
+
+          # Collect digests from artifacts
+          SOURCES=""
+          for f in /tmp/digests/${{ matrix.image.name }}/*; do
+            SOURCES="${SOURCES} ${IMAGE}@sha256:$(basename "$f")"
+          done
+
+          # Create and push multi-arch manifest
+          docker buildx imagetools create ${TAGS} ${SOURCES}
+
+          # Get the manifest list digest
+          DIGEST=$(docker buildx imagetools inspect "${IMAGE}:${VERSION}" --format '{{json .Manifest}}' | jq -r '.digest')
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
 
-      - name: Sign image (OIDC keyless)
-        env:
-          DIGEST: ${{ steps.build.outputs.digest }}
+      - name: Sign manifest (OIDC keyless)
         run: |
           set -euo pipefail
           IMAGE="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}"
-          cosign sign --yes "${IMAGE}@${DIGEST}"
+          cosign sign --yes "${IMAGE}@${{ steps.manifest.outputs.digest }}"
 
       - name: Trivy scan
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}@${{ steps.build.outputs.digest }}
+          image-ref: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}@${{ steps.manifest.outputs.digest }}
           format: sarif
           output: trivy-${{ matrix.image.name }}.sarif
           severity: CRITICAL,HIGH
@@ -496,7 +628,7 @@ jobs:
         uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}
-          subject-digest: ${{ steps.build.outputs.digest }}
+          subject-digest: ${{ steps.manifest.outputs.digest }}
           push-to-registry: true
 
       - name: Summary
@@ -504,8 +636,12 @@ jobs:
           HAS_DOCKERHUB: ${{ secrets.DOCKERHUB_TOKEN != '' }}
           DOCKERHUB_NS: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
-          echo "### ${{ matrix.image.name }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Digest :** \`${{ steps.build.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "### ${{ matrix.image.name }} (v${{ steps.upstream.outputs.version }})" >> $GITHUB_STEP_SUMMARY
+          echo "**Manifest digest :** \`${{ steps.manifest.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          PLATFORMS=$(docker buildx imagetools inspect "${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}:${{ steps.upstream.outputs.version }}" \
+            --format '{{range .Manifest.Manifests}}{{.Platform.OS}}/{{.Platform.Architecture}} {{end}}' 2>/dev/null || echo "unknown")
+          echo "**Platforms :** ${PLATFORMS}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "docker pull ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}:latest" >> $GITHUB_STEP_SUMMARY
@@ -519,9 +655,9 @@ jobs:
   # -------------------------------------------------------------------
   release:
     name: GitHub Release
-    needs: [build-dhi, build-dockerfile]
-    # Run if either build job succeeded (the other is skipped based on DHI secrets)
-    if: always() && startsWith(github.ref, 'refs/tags/v') && (needs.build-dhi.result == 'success' || needs.build-dockerfile.result == 'success')
+    needs: [merge-dhi, merge-dockerfile]
+    # Run if either merge job succeeded (the other is skipped based on DHI secrets)
+    if: always() && startsWith(github.ref, 'refs/tags/v') && (needs.merge-dhi.result == 'success' || needs.merge-dockerfile.result == 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: write
