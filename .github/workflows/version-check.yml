@@ -1,0 +1,70 @@
+# =====================================================================
+#  Version Check — Automated upstream version detection & bump
+#  Checks Squid, c-icap, squidclamav, ClamAV for new releases.
+#  If updates found: commits directly to main → triggers build-push.yml
+#  which rebuilds and pushes images with new version tags.
+# =====================================================================
+name: version-check
+
+on:
+  schedule:
+    # Every Monday at 06:00 UTC
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    name: Check & bump upstream versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for updates
+        id: check
+        run: |
+          # Run check (exit 2 = updates available, exit 0 = no change)
+          set +e
+          ./scripts/check-versions.sh
+          rc=$?
+          set -e
+
+          if [ "$rc" -eq 0 ]; then
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+          elif [ "$rc" -eq 2 ]; then
+            echo "updated=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Script failed with exit code $rc"
+            exit 1
+          fi
+
+      - name: Apply updates
+        if: steps.check.outputs.updated == 'true'
+        run: ./scripts/check-versions.sh --update
+
+      - name: Build commit message
+        if: steps.check.outputs.updated == 'true'
+        id: msg
+        run: |
+          SQUID=$(jq -r .squid versions.json)
+          CICAP=$(jq -r '.["c-icap"]' versions.json)
+          SQUIDCLAMAV=$(jq -r .squidclamav versions.json)
+          CLAMAV=$(jq -r .clamav versions.json)
+          MSG="chore(deps): bump upstream versions"
+          MSG="${MSG}
+
+          squid=${SQUID} c-icap=${CICAP} squidclamav=${SQUIDCLAMAV} clamav=${CLAMAV}"
+          echo "msg<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$MSG" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Commit & push
+        if: steps.check.outputs.updated == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add versions.json .env.example squid/Dockerfile c-icap/Dockerfile
+          git commit -m "${{ steps.msg.outputs.msg }}"
+          git push

@@ -23,6 +23,7 @@ on:
       - 'squid/**'
       - 'c-icap/**'
       - 'clamav/**'
+      - 'versions.json'
       - '.github/workflows/build-push.yml'
   pull_request:
     branches: [main]
@@ -30,6 +31,7 @@ on:
       - 'squid/**'
       - 'c-icap/**'
       - 'clamav/**'
+      - 'versions.json'
   workflow_dispatch:
 
 env:
@@ -54,19 +56,19 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Hadolint – squid/Dockerfile
-        uses: hadolint/hadolint-action@v3.1.0
+        uses: hadolint/hadolint-action@v3.3.0
         with:
           dockerfile: squid/Dockerfile
           failure-threshold: warning
 
       - name: Hadolint – c-icap/Dockerfile
-        uses: hadolint/hadolint-action@v3.1.0
+        uses: hadolint/hadolint-action@v3.3.0
         with:
           dockerfile: c-icap/Dockerfile
           failure-threshold: warning
 
       - name: Hadolint – clamav/Dockerfile
-        uses: hadolint/hadolint-action@v3.1.0
+        uses: hadolint/hadolint-action@v3.3.0
         with:
           dockerfile: clamav/Dockerfile
           failure-threshold: warning
@@ -156,7 +158,7 @@ jobs:
     name: DHI – ${{ matrix.image.name }}
     needs: [check-dhi, validate-dhi]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v') && needs.check-dhi.outputs.has-dhi == 'true'
+    if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && needs.check-dhi.outputs.has-dhi == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -164,12 +166,15 @@ jobs:
           - name: clamav-hardened
             definition: clamav/clamav.yaml
             context: clamav/
+            version_key: clamav
           - name: squid-hardened
             definition: squid/squid.yaml
             context: squid/
+            version_key: squid
           - name: c-icap-hardened
             definition: c-icap/c-icap.yaml
             context: c-icap/
+            version_key: c-icap
 
     steps:
       - uses: actions/checkout@v4
@@ -201,16 +206,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (tags + labels OCI)
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}
-          tags: |
-            type=semver,pattern={{version}}
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
+      - name: Read upstream version from versions.json
+        id: upstream
+        run: |
+          VERSION=$(jq -r '."${{ matrix.image.version_key }}"' versions.json)
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          IMAGE="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}"
+          # Always tag with upstream version + latest
+          TAGS="${IMAGE}:${VERSION},${IMAGE}:latest"
+          # If triggered by a git tag, also add the semver tag
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            GIT_VERSION="${GITHUB_REF_NAME#v}"
+            TAGS="${TAGS},${IMAGE}:${GIT_VERSION}"
+          fi
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
 
       # 3) Build DHI multi-arch + push
       #    --sbom=generator=dhi.io/scout-sbom-indexer:1  → SBOM DHI natif
@@ -218,14 +227,18 @@ jobs:
       - name: Build & Push (DHI multi-arch)
         id: build
         run: |
+          # Convert comma-separated tags to --tag flags
+          TAG_FLAGS=$(echo "${{ steps.upstream.outputs.tags }}" | tr ',' '\n' | sed 's/^/--tag /' | tr '\n' ' ')
+
           docker buildx build ${{ matrix.image.context }} \
             -f ${{ matrix.image.definition }} \
             --platform linux/amd64,linux/arm64 \
             --sbom=generator=dhi.io/scout-sbom-indexer:1 \
             --provenance=mode=max \
-            $(echo "${{ steps.meta.outputs.tags }}" | sed 's/^/--tag /') \
+            ${TAG_FLAGS} \
             --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
             --label "org.opencontainers.image.revision=${{ github.sha }}" \
+            --label "org.opencontainers.image.version=${{ steps.upstream.outputs.version }}" \
             --cache-from type=gha,scope=${{ matrix.image.name }} \
             --cache-to   type=gha,mode=max,scope=${{ matrix.image.name }} \
             --push \
@@ -246,9 +259,7 @@ jobs:
         run: |
           set -euo pipefail
           IMAGE="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}"
-          for tag in $(echo "${{ steps.meta.outputs.tags }}"); do
-            cosign sign --yes "${tag}@${DIGEST}"
-          done
+          cosign sign --yes "${IMAGE}@${DIGEST}"
 
       # 5) Scan Trivy + upload SARIF
       - name: Trivy scan
@@ -271,7 +282,7 @@ jobs:
       # 6) Attestation SLSA GitHub (Build Provenance)
       - name: GitHub SLSA Attestation
         if: "!startsWith(github.ref, 'refs/heads/dependabot/')"
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}
           subject-digest: ${{ steps.build.outputs.digest }}
@@ -279,11 +290,14 @@ jobs:
 
       - name: Summary
         run: |
-          echo "### ${{ matrix.image.name }}" >> $GITHUB_STEP_SUMMARY
+          echo "### ${{ matrix.image.name }} (v${{ steps.upstream.outputs.version }})" >> $GITHUB_STEP_SUMMARY
           echo "**Digest :** \`${{ steps.build.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "# Pull" >> $GITHUB_STEP_SUMMARY
+          echo "# Pull (version tag)" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}:${{ steps.upstream.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# Pull (latest)" >> $GITHUB_STEP_SUMMARY
           echo "docker pull ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}:latest" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "# Vérifier signature" >> $GITHUB_STEP_SUMMARY
@@ -299,8 +313,8 @@ jobs:
     name: Build – ${{ matrix.image.name }}
     needs: check-dhi
     runs-on: ubuntu-latest
-    # Only runs on tags (not PR/branch push) — DHI secrets NOT available = fallback
-    if: startsWith(github.ref, 'refs/tags/v') && needs.check-dhi.outputs.has-dhi == 'false'
+    # Runs on main push or tags when DHI secrets are NOT available (fallback)
+    if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && needs.check-dhi.outputs.has-dhi == 'false'
     strategy:
       fail-fast: false
       matrix:
@@ -309,14 +323,17 @@ jobs:
             dockerfile: clamav/Dockerfile
             context: clamav/
             prep-target: builder
+            version_key: clamav
           - name: squid-hardened
             dockerfile: squid/Dockerfile
             context: squid/
             prep-target: prep
+            version_key: squid
           - name: c-icap-hardened
             dockerfile: c-icap/Dockerfile
             context: c-icap/
             prep-target: prep
+            version_key: c-icap
 
     steps:
       - uses: actions/checkout@v4
@@ -391,13 +408,31 @@ jobs:
           sarif_file: trivy-${{ matrix.image.name }}-deps.sarif
           category: ${{ matrix.image.name }}-deps
 
-      - name: Extract metadata (tags + labels OCI)
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ steps.images.outputs.list }}
-          tags: |
-            type=semver,pattern={{version}}
+      - name: Read upstream version from versions.json
+        id: upstream
+        run: |
+          VERSION=$(jq -r '."${{ matrix.image.version_key }}"' versions.json)
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Compute image tags
+        id: tags
+        env:
+          HAS_DOCKERHUB: ${{ secrets.DOCKERHUB_TOKEN != '' }}
+          DOCKERHUB_NS: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          VERSION="${{ steps.upstream.outputs.version }}"
+          IMAGE="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}"
+          TAGS="${IMAGE}:${VERSION},${IMAGE}:latest"
+          if [ "$HAS_DOCKERHUB" = "true" ]; then
+            TAGS="${TAGS},docker.io/${DOCKERHUB_NS}/${{ matrix.image.name }}:${VERSION}"
+            TAGS="${TAGS},docker.io/${DOCKERHUB_NS}/${{ matrix.image.name }}:latest"
+          fi
+          # If triggered by a git tag, also add semver tag
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            GIT_VERSION="${GITHUB_REF_NAME#v}"
+            TAGS="${TAGS},${IMAGE}:${GIT_VERSION}"
+          fi
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
 
       - name: Build & Push
         id: build
@@ -408,8 +443,11 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           sbom: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.upstream.outputs.version }}
           provenance: mode=max
           cache-from: type=gha,scope=${{ matrix.image.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
@@ -444,7 +482,7 @@ jobs:
 
       - name: GitHub SLSA Attestation
         if: "!startsWith(github.ref, 'refs/heads/dependabot/')"
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}
           subject-digest: ${{ steps.build.outputs.digest }}
@@ -494,7 +532,7 @@ jobs:
           sha512sum "squid-stack-${VERSION}.tar.gz" > "squid-stack-${VERSION}.sha512"
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
           files: |
