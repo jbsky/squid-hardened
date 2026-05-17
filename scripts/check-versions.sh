@@ -123,14 +123,15 @@ fi
 # --- Apply updates ---
 printf 'Applying updates...\n'
 
-# 1. versions.json
+# 1. versions.json (read alpine before overwrite)
+current_alpine=$(grep '"alpine"' "$VERSIONS_FILE" | sed 's/.*: *"//;s/".*//')
 cat > "$VERSIONS_FILE" <<EOF
 {
   "squid": "${latest_squid}",
   "c-icap": "${latest_cicap}",
   "squidclamav": "${latest_squidclamav}",
   "clamav": "${latest_clamav}",
-  "alpine": "$(grep '"alpine"' "$VERSIONS_FILE" | sed 's/.*: *"//;s/".*//')"
+  "alpine": "${current_alpine}"
 }
 EOF
 
