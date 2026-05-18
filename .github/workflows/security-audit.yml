@@ -34,7 +34,7 @@ jobs:
         image: [squid-hardened, c-icap-hardened, clamav-hardened]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Trivy full scan (vuln + secret + misconfig)
         uses: aquasecurity/trivy-action@v0.36.0
