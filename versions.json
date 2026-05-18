@@ -2,6 +2,6 @@
   "squid": "7.5",
   "c-icap": "0.6.4",
   "squidclamav": "7.4",
-  "clamav": "1.4.2",
+  "clamav": "1.5.2",
   "alpine": "3.21"
 }
