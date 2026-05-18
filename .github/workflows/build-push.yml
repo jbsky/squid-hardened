@@ -463,7 +463,7 @@ jobs:
       # Scan the Alpine prep stage (amd64 only – can't --load cross-arch)
       - name: Build prep stage (Alpine with runtime deps)
         if: matrix.platform == 'linux/amd64'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.image.context }}
           file: ${{ matrix.image.dockerfile }}
@@ -493,7 +493,7 @@ jobs:
 
       - name: Build & Push by digest
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.image.context }}
           file: ${{ matrix.image.dockerfile }}
