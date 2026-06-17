@@ -159,9 +159,10 @@ Voir `scripts/test-eicar.sh`.
 ## Documentation détaillée
 
 Voir `docs/` pour :
+- `vyos-transparent-proxy.md` – interception HTTPS transparente avec PBR + conteneurs Podman ([EN](docs/vyos-transparent-proxy.md) / [FR](docs/vyos-transparent-proxy.fr.md))
 - `architecture.md` – schémas et flux
 - `hardening.md` – détail des mesures de durcissement
-- `vyos-howto.md` – guide pas-à-pas VyOS
+- `vyos-howto.md` – guide pas-à-pas VyOS (mode DNAT simple)
 - `ca-deployment.md` – pousser la CA sur Windows/macOS/iOS/Android/Linux
 
 ## Security & Verification
@@ -188,7 +189,6 @@ for img in squid-hardened c-icap-hardened clamav-hardened; do
     docker.io/jbsky/$img:latest
 done
 ```
-
 
 ### Hardening tier "Platine" guarantees
 
