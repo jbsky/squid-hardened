@@ -1,0 +1,204 @@
+# syntax=dhi.io/build:2-alpine3.23
+# =====================================================================
+#  ClamAV – Docker Hardened Image
+#  Format DHI (YAML déclaratif) – build via dhi.io/build frontend
+#  Prérequis : docker login dhi.io
+#
+#  Build :
+#    docker buildx build . -f clamav/clamav.yaml \
+#      --sbom=generator=dhi.io/scout-sbom-indexer:1 \
+#      --provenance=1 \
+#      --tag ghcr.io/jbsky/clamav-hardened:latest --push
+# =====================================================================
+
+name: ClamAV hardened
+image: docker.io/jbsky/clamav-hardened
+variant: runtime
+tags:
+  - "1.4"
+  - "1.4.2"
+platforms:
+  - linux/amd64
+  - linux/arm64
+
+# ---- Paquets installés dans l'image finale --------------------------
+contents:
+  repositories:
+    - http://dl-cdn.alpinelinux.org/alpine/v3.23/main
+    - http://dl-cdn.alpinelinux.org/alpine/v3.23/community
+  packages:
+    - clamav
+    - clamav-libunrar
+    - tini
+    - ca-certificates-bundle
+    - tzdata
+    - musl
+
+  # ---- Stage de build : création des répertoires avec bons droits ---
+  # Équivalent du COPY --from=builder dans le Dockerfile multi-stage.
+  # outputs.diff=true → seuls les fichiers MODIFIÉS vs Alpine nu sont
+  # copiés dans l'image finale (= même logique que COPY --from=builder).
+  builds:
+    - name: clamav-setup
+      contents:
+        repositories:
+          - http://dl-cdn.alpinelinux.org/alpine/v3.23/main
+          - http://dl-cdn.alpinelinux.org/alpine/v3.23/community
+        packages:
+          - clamav
+      pipeline:
+        - name: directories
+          runs: |
+            set -eux -o pipefail
+            install -d -m 0750 /var/lib/clamav
+            install -d -m 0750 /var/log/clamav
+            install -d -m 0750 /run/clamav
+            # Fichier sentinelle pour que le HEALTHCHECK puisse vérifier
+            touch /var/lib/clamav/.keep
+      outputs:
+        - source: /var/lib/clamav
+          target: /var/lib/clamav
+          uid: 4000
+          gid: 4000
+        - source: /var/log/clamav
+          target: /var/log/clamav
+          uid: 4000
+          gid: 4000
+        - source: /run/clamav
+          target: /run/clamav
+          uid: 4000
+          gid: 4000
+
+  # ---- Fichiers inline embarqués dans l'image -----------------------
+  # Avantage DHI : la config et l'entrypoint sont versionnés dans l'image,
+  # pas dans des bind mounts. Un operator peut toutefois les surcharger.
+  files:
+    # clamd.conf inline
+    - path: /etc/clamav/clamd.conf
+      uid: 0
+      gid: 4000
+      mode: "0640"
+      content: |
+        LogFile             /var/log/clamav/clamd.log
+        LogFileMaxSize      50M
+        LogTime             yes
+        LogClean            no
+        PidFile             /run/clamav/clamd.pid
+        DatabaseDirectory   /var/lib/clamav
+        TCPSocket           3310
+        TCPAddr             0.0.0.0
+        LocalSocket         /run/clamav/clamd.sock
+        LocalSocketGroup    clamav
+        LocalSocketMode     660
+        FixStaleSocket      yes
+        User                clamav
+        Foreground          yes
+        MaxScanSize         400M
+        MaxFileSize         100M
+        MaxRecursion        16
+        MaxFiles            10000
+        MaxThreads          20
+        ScanPE              yes
+        ScanELF             yes
+        ScanOLE2            yes
+        ScanPDF             yes
+        ScanArchive         yes
+        ScanMail            yes
+        OLE2Macros          yes
+        Bytecode            yes
+        BytecodeSecurity    TrustSigned
+        SelfCheck           600
+
+    # freshclam.conf inline
+    - path: /etc/clamav/freshclam.conf
+      uid: 0
+      gid: 4000
+      mode: "0640"
+      content: |
+        DatabaseDirectory   /var/lib/clamav
+        UpdateLogFile       /var/log/clamav/freshclam.log
+        LogTime             yes
+        DatabaseOwner       clamav
+        DatabaseMirror      database.clamav.net
+        Checks              24
+        Bytecode            yes
+        NotifyClamd         /etc/clamav/clamd.conf
+        ConnectTimeout      30
+        ReceiveTimeout      60
+        TestDatabases       yes
+        MaxAttempts         5
+
+    # entrypoint.sh inline
+    - path: /usr/local/bin/entrypoint.sh
+      uid: 0
+      gid: 0
+      mode: "0755"
+      content: |
+        #!/bin/sh
+        set -eu
+        DB_DIR="/var/lib/clamav"
+        if [ -z "$(ls -A "${DB_DIR}" 2>/dev/null | grep -v '\.keep')" ]; then
+            echo "[entrypoint] Téléchargement initial des signatures..."
+            freshclam --config-file=/etc/clamav/freshclam.conf --foreground=true || {
+                echo "[entrypoint][ERROR] freshclam initial échoué"
+                exit 1
+            }
+        fi
+        freshclam --config-file=/etc/clamav/freshclam.conf --daemon --checks=24 &
+        echo "[entrypoint] Démarrage de clamd"
+        exec "$@"
+
+# ---- Identité (non-root) --------------------------------------------
+accounts:
+  run-as: clamav
+  users:
+    - name: clamav
+      uid: 4000
+      gid: 4000
+  groups:
+    - name: clamav
+      gid: 4000
+      members:
+        - clamav
+
+# ---- Chemins supplémentaires ----------------------------------------
+paths:
+  - type: directory
+    path: /etc/clamav
+    uid: 0
+    gid: 4000
+    mode: "0750"
+
+# ---- Runtime --------------------------------------------------------
+environment:
+  TZ: UTC
+
+entrypoint:
+  - /sbin/tini
+  - "--"
+  - /usr/local/bin/entrypoint.sh
+
+cmd:
+  - clamd
+  - --foreground=true
+  - --config-file=/etc/clamav/clamd.conf
+
+ports:
+  - 3310/tcp
+
+volumes:
+  - /var/lib/clamav
+  - /var/log/clamav
+
+# ---- Métadonnées OCI ------------------------------------------------
+os-release:
+  name: Docker Hardened Images (Alpine)
+  id: alpine
+  version-id: "3.23"
+  pretty-name: ClamAV Hardened / Alpine Linux v3.23
+  home-url: https://docker.com/products/hardened-images/
+  bug-report-url: https://github.com/jbsky/squid-hardened/issues
+
+annotations:
+  org.opencontainers.image.description: ClamAV clamd + freshclam, DHI hardened, non-root
+  org.opencontainers.image.licenses: GPL-2.0-or-later

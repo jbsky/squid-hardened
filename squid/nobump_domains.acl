@@ -1,0 +1,37 @@
+# Domaines exclus du SSL Bump (splice = pass-through chiffré)
+# Format : un domaine ou regex par ligne
+# Inclure obligatoirement les sites soumis à secret, bancaires, santé, pinning HSTS
+
+# Banques (exemple FR)
+\.banquepopulaire\.fr$
+\.creditmutuel\.fr$
+\.bnpparibas\.(com|net|fr)$
+\.societegenerale\.fr$
+\.creditagricole\.fr$
+\.boursorama\.com$
+\.lcl\.fr$
+\.labanquepostale\.fr$
+\.caisse-epargne\.fr$
+
+# Santé / impôts / administration
+\.ameli\.fr$
+\.impots\.gouv\.fr$
+\.service-public\.fr$
+\.mon\.service-public\.fr$
+\.dgfip\.finances\.gouv\.fr$
+
+# Applications avec pinning (cassent en cas de bump)
+\.apple\.com$
+\.icloud\.com$
+\.itunes\.apple\.com$
+\.windowsupdate\.com$
+\.update\.microsoft\.com$
+\.mozilla\.(org|net)$
+\.dropbox\.com$
+\.google\.com$
+accounts\.google\.com$
+
+# WebRTC / visio (peu d'intérêt à bumper)
+\.zoom\.us$
+\.webex\.com$
+\.teams\.microsoft\.com$

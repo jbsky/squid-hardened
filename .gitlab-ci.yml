@@ -1,0 +1,270 @@
+# =====================================================================
+#  Pipeline GitLab CI - alternative au workflow GitHub Actions
+#  Publie sur le registry GitLab (gitlab.com/...registry) ou Docker Hub
+#  - Multi-arch via buildx + QEMU
+#  - SBOM Syft, scan Trivy, signature cosign keyless via OIDC GitLab
+# =====================================================================
+
+stages:
+  - lint
+  - build
+  - sign
+  - scan
+  - release
+
+variables:
+  DOCKER_BUILDKIT: "1"
+  REGISTRY: $CI_REGISTRY                # GitLab registry par défaut
+  IMAGE_NAMESPACE: $CI_PROJECT_PATH
+  COSIGN_EXPERIMENTAL: "1"
+  PLATFORMS: "linux/amd64"   # arm64 disabled: proxy 240s timeout kills multi-arch builds
+
+default:
+  image: docker:27
+  services:
+    - docker:27-dind
+  before_script:
+    - docker info >/dev/null
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    # Authenticate to Docker Hub to avoid anonymous pull rate limits (100/6h → 200/6h).
+    # DOCKERHUB_USER and DOCKERHUB_TOKEN are CI variables (project-level).
+    # DOCKER_AUTH_CONFIG handles runner image pulls; this handles in-job docker commands.
+    - |
+      if [ -n "$DOCKERHUB_TOKEN" ]; then
+        echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USER" --password-stdin docker.io
+      fi
+
+workflow:
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+# ---------- LINT ----------------------------------------------------
+hadolint:
+  stage: lint
+  image: hadolint/hadolint:latest-alpine
+  before_script: []
+  services: []
+  script:
+    - hadolint --failure-threshold warning squid/Dockerfile
+    - hadolint --failure-threshold warning c-icap/Dockerfile
+    - hadolint --failure-threshold warning clamav/Dockerfile
+
+shellcheck:
+  stage: lint
+  image: koalaman/shellcheck-alpine:stable
+  before_script: []
+  services: []
+  script:
+    - shellcheck scripts/*.sh
+
+# ---------- BUILD (matrix-like via parallel:matrix) -----------------
+.build-template: &build-template
+  stage: build
+  script:
+    - apk add --no-cache git
+    # binfmt emulation only needed for cross-arch builds (e.g. arm64 on amd64).
+    # Skipped when PLATFORMS is amd64-only to avoid a Docker Hub pull.
+    - |
+      if echo "${PLATFORMS}" | grep -qv '^linux/amd64$'; then
+        docker run --privileged --rm tonistiigi/binfmt --install all
+      fi
+    # Create docker context for TLS-enabled dind before buildx create
+    # (Docker 27 buildx cannot load TLS data directly from environment)
+    - docker context create tls-ctx
+    # Generate BuildKit daemon config for registry TLS trust.
+    # The BuildKit container (docker-container driver) needs the homelab CA
+    # to push to $CI_REGISTRY (HTTPS with private CA).
+    # This is separate from the --secret (which is for RUN instructions).
+    - |
+      mkdir -p /tmp/buildkit
+      cat > /tmp/buildkit/buildkitd.toml <<TOML
+      [registry."${CI_REGISTRY}"]
+        ca = ["/etc/ssl/certs/ca-certificates.crt"]
+      TOML
+    # Pass proxy env to BuildKit container (docker-container driver creates
+    # a separate container that doesn't inherit the build container's env).
+    # network=host shares dind's network stack (DNS, /etc/hosts).
+    # no_proxy excludes local services (GitLab registry) from proxying.
+    # ADAPT: set to your internal domain suffix (e.g., .corp, .lan).
+    # Uses domain suffix (no commas) to avoid pflag splitting.
+    # Without this, BuildKit proxies CONNECT to :5050, which Squid blocks
+    # (only port 443 is in SSL_ports → Forbidden).
+    - |
+      docker buildx create --use --name builder \
+        --config /tmp/buildkit/buildkitd.toml \
+        --driver-opt network=host \
+        --driver-opt "env.http_proxy=${http_proxy:-}" \
+        --driver-opt "env.https_proxy=${https_proxy:-}" \
+        --driver-opt "env.HTTP_PROXY=${HTTP_PROXY:-}" \
+        --driver-opt "env.HTTPS_PROXY=${HTTPS_PROXY:-}" \
+        --driver-opt "env.no_proxy=${no_proxy:-.internal}" \
+        --driver-opt "env.NO_PROXY=${NO_PROXY:-.internal}" \
+        tls-ctx
+    # Calcul du tag
+    - |
+      if [ -n "$CI_COMMIT_TAG" ]; then
+        TAG="$CI_COMMIT_TAG"
+        EXTRA_TAGS="-t ${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:latest"
+      else
+        TAG="${CI_COMMIT_SHORT_SHA}"
+        EXTRA_TAGS="-t ${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:latest"
+      fi
+    # Expose host CA bundle as a BuildKit secret for Dockerfile RUN commands
+    # that need to trust the SSL-bumping proxy CA (apk add, curl, etc.).
+    # The file is available in the CI container via runner docker_volumes mount.
+    # Pass proxy settings to BuildKit build containers via --build-arg.
+    # Docker BuildKit treats HTTP_PROXY, HTTPS_PROXY, NO_PROXY (and lowercase)
+    # as predefined ARGs: available in every RUN instruction without ARG declaration,
+    # and NOT baked into image layers/history. Without this, APK/curl inside build
+    # stages have no proxy and can't reach external repos (firewall blocks direct).
+    - |
+      docker buildx build \
+        --platform "${PLATFORMS}" \
+        --provenance=mode=max \
+        --sbom=true \
+        --build-arg http_proxy="${http_proxy:-}" \
+        --build-arg https_proxy="${https_proxy:-}" \
+        --build-arg HTTP_PROXY="${HTTP_PROXY:-}" \
+        --build-arg HTTPS_PROXY="${HTTPS_PROXY:-}" \
+        --build-arg no_proxy="${no_proxy:-}" \
+        --build-arg NO_PROXY="${NO_PROXY:-}" \
+        --secret id=ca-certs,src=/etc/ssl/certs/ca-certificates.crt \
+        --label "org.opencontainers.image.source=${CI_PROJECT_URL}" \
+        --label "org.opencontainers.image.revision=${CI_COMMIT_SHA}" \
+        --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --cache-from type=registry,ref=${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:buildcache \
+        --cache-to   type=registry,ref=${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:buildcache,mode=max \
+        -t ${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:${TAG} \
+        ${EXTRA_TAGS} \
+        --push \
+        ./${BUILD_CONTEXT}
+    - docker buildx imagetools inspect ${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:${TAG} | tee image-digest-${IMAGE_NAME}.txt
+  artifacts:
+    paths:
+      - image-digest-*.txt
+    expire_in: 30 days
+
+build:squid:
+  <<: *build-template
+  variables:
+    IMAGE_NAME: squid-hardened
+    BUILD_CONTEXT: squid
+
+build:c-icap:
+  <<: *build-template
+  variables:
+    IMAGE_NAME: c-icap-hardened
+    BUILD_CONTEXT: c-icap
+
+build:clamav:
+  <<: *build-template
+  variables:
+    IMAGE_NAME: clamav-hardened
+    BUILD_CONTEXT: clamav
+
+# ---------- SIGN (cosign keyless via OIDC GitLab) -------------------
+# NOTE: cosign keyless signing requires connectivity to Sigstore infra
+# (Fulcio + Rekor at sigstore.dev). Behind a SSL-bumping proxy this may
+# fail due to certificate pinning. allow_failure: true makes it advisory.
+.sign-template: &sign-template
+  stage: sign
+  image: alpine:3.20
+  before_script: []
+  services: []
+  id_tokens:
+    SIGSTORE_ID_TOKEN:
+      aud: sigstore
+  script:
+    - apk add --no-cache cosign
+    - DIGEST=$(grep -o 'sha256:[a-f0-9]*' image-digest-${IMAGE_NAME}.txt | head -1)
+    - cosign sign --yes ${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}@${DIGEST}
+  allow_failure: true
+
+sign:squid:
+  <<: *sign-template
+  needs: ["build:squid"]
+  variables:
+    IMAGE_NAME: squid-hardened
+
+sign:c-icap:
+  <<: *sign-template
+  needs: ["build:c-icap"]
+  variables:
+    IMAGE_NAME: c-icap-hardened
+
+sign:clamav:
+  <<: *sign-template
+  needs: ["build:clamav"]
+  variables:
+    IMAGE_NAME: clamav-hardened
+
+# ---------- SCAN ----------------------------------------------------
+.scan-template: &scan-template
+  stage: scan
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  before_script: []
+  services: []
+  script:
+    # Authenticate trivy to the GitLab registry for pulling images to scan.
+    # Without this, trivy gets DENIED from the JWT auth endpoint.
+    # Also trust the homelab CA for the registry's TLS certificate.
+    - export TRIVY_USERNAME="$CI_REGISTRY_USER"
+    - export TRIVY_PASSWORD="$CI_REGISTRY_PASSWORD"
+    - export SSL_CERT_FILE="/etc/ssl/certs/ca-certificates.crt"
+    - trivy image --severity HIGH,CRITICAL --ignore-unfixed
+        --format sarif --output trivy-${IMAGE_NAME}.sarif
+        ${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:latest
+    - trivy image --severity HIGH,CRITICAL --ignore-unfixed
+        ${REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:latest
+  artifacts:
+    paths:
+      - trivy-*.sarif
+    reports:
+      sast: trivy-${IMAGE_NAME}.sarif
+    expire_in: 90 days
+  allow_failure: true
+
+scan:squid:
+  <<: *scan-template
+  needs: ["build:squid"]
+  variables:
+    IMAGE_NAME: squid-hardened
+
+scan:c-icap:
+  <<: *scan-template
+  needs: ["build:c-icap"]
+  variables:
+    IMAGE_NAME: c-icap-hardened
+
+scan:clamav:
+  <<: *scan-template
+  needs: ["build:clamav"]
+  variables:
+    IMAGE_NAME: clamav-hardened
+
+# ---------- RELEASE (sur tag) ---------------------------------------
+release:tarball:
+  stage: release
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+  image: alpine:3.20
+  before_script: []
+  services: []
+  script:
+    - apk add --no-cache tar gzip coreutils
+    - mkdir -p dist
+    - tar --exclude='.git' --exclude='dist' --exclude='certs/bump.*'
+          --exclude='certs/dhparam*' --exclude='sbom' --exclude='.env'
+          --transform "s,^,squid-stack-${CI_COMMIT_TAG}/,"
+          -czf dist/squid-stack-${CI_COMMIT_TAG}.tar.gz .
+    - cd dist && sha256sum squid-stack-${CI_COMMIT_TAG}.tar.gz > squid-stack-${CI_COMMIT_TAG}.tar.gz.sha256
+  artifacts:
+    paths:
+      - dist/
+    expire_in: never

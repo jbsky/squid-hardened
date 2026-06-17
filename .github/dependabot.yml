@@ -1,0 +1,55 @@
+# =====================================================================
+#  Dependabot - mises à jour automatiques
+#  - Images de base Alpine
+#  - Versions des actions GitHub
+#  - Versions Squid/c-icap/squidclamav suivies via Dependabot
+#    sur les ARGs des Dockerfiles
+# =====================================================================
+version: 2
+updates:
+
+  # Actions GitHub
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Paris"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+
+  # Image Docker Squid
+  - package-ecosystem: "docker"
+    directory: "/squid"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels: ["dependencies", "docker", "squid"]
+    commit-message:
+      prefix: "build(squid)"
+
+  # Image Docker c-icap
+  - package-ecosystem: "docker"
+    directory: "/c-icap"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels: ["dependencies", "docker", "c-icap"]
+    commit-message:
+      prefix: "build(c-icap)"
+
+  # Image Docker clamav
+  - package-ecosystem: "docker"
+    directory: "/clamav"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels: ["dependencies", "docker", "clamav"]
+    commit-message:
+      prefix: "build(clamav)"

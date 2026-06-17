@@ -1,0 +1,13 @@
+.git
+.gitignore
+.env
+*.md
+docs/
+certs/bump.pem
+certs/bump.key
+certs/dhparam.pem
+sbom/
+scripts/
+README.md
+.DS_Store
+*.log

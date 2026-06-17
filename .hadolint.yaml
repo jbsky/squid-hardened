@@ -1,0 +1,6 @@
+---
+# DL3018: Pin versions in apk add
+# Ignored: multi-stage Alpine builds; we want latest security patches
+# and Alpine moves package versions too frequently to pin reliably.
+ignored:
+  - DL3018
