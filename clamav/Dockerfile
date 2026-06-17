@@ -47,33 +47,35 @@ FROM scratch
 
 LABEL org.opencontainers.image.title="clamav-hardened" \
       org.opencontainers.image.description="ClamAV FROM scratch, non-root, zero shell" \
-      org.opencontainers.image.licenses="GPL-2.0-or-later"
+      org.opencontainers.image.vendor="jbsky" \
+      org.opencontainers.image.licenses="GPL-2.0-or-later" \
+      org.opencontainers.image.source="https://github.com/jbsky/clamav-hardened"
 
 # User accounts
-COPY --from=builder /etc/passwd /etc/passwd
-COPY --from=builder /etc/group  /etc/group
+COPY --link --from=builder /etc/passwd /etc/passwd
+COPY --link --from=builder /etc/group  /etc/group
 
 # ClamAV binaries
-COPY --from=builder /usr/sbin/clamd    /usr/sbin/clamd
-COPY --from=builder /usr/bin/freshclam /usr/bin/freshclam
-COPY --from=builder /usr/bin/clamdscan /usr/bin/clamdscan
+COPY --link --from=builder /usr/sbin/clamd    /usr/sbin/clamd
+COPY --link --from=builder /usr/bin/freshclam /usr/bin/freshclam
+COPY --link --from=builder /usr/bin/clamdscan /usr/bin/clamdscan
 
 # Dynamic linker (musl) + shared libraries
-COPY --from=builder /usr/lib/ /usr/lib/
-COPY --from=builder /lib/     /lib/
+COPY --link --from=builder /usr/lib/ /usr/lib/
+COPY --link --from=builder /lib/     /lib/
 
 # Config (with correct ownership from builder stage)
-COPY --from=builder /etc/clamav/ /etc/clamav/
+COPY --link --from=builder /etc/clamav/ /etc/clamav/
 
 # TLS trust store + timezone data
-COPY --from=builder /etc/ssl/ /etc/ssl/
-COPY --from=builder /usr/share/zoneinfo/ /usr/share/zoneinfo/
+COPY --link --from=builder /etc/ssl/ /etc/ssl/
+COPY --link --from=builder /usr/share/zoneinfo/ /usr/share/zoneinfo/
 
 # PID 1 — tini-static
-COPY --from=builder /sbin/tini-static /sbin/tini
+COPY --link --from=builder /sbin/tini-static /sbin/tini
 
 # Go init binary (static, entrypoint + healthcheck + setup-dirs)
-COPY --from=gobuilder /init /usr/local/bin/init
+COPY --link --from=gobuilder /init /usr/local/bin/init
 
 # Create runtime directories with correct ownership (no shell needed)
 RUN ["/usr/local/bin/init", "--setup-dirs"]

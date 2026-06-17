@@ -14,7 +14,6 @@ x-common-security: &common-security
   read_only: false        # Squid a besoin d'écrire dans /var/spool/squid
   security_opt:
     - no-new-privileges:true
-    - seccomp=unconfined  # Adapter à un profil seccomp custom en prod
   cap_drop:
     - ALL
   ulimits:

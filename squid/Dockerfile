@@ -9,7 +9,7 @@
 #   - filesystem read-only friendly
 # =====================================================================
 
-ARG SQUID_VERSION=7.5
+ARG SQUID_VERSION=7.6
 ARG ALPINE_VERSION=3.21
 
 # ---------- Stage 1 : builder ----------------------------------------
@@ -49,17 +49,23 @@ RUN apk add --no-cache \
         cppunit-dev \
         openldap-dev \
         curl xz \
-        ca-certificates
+        ca-certificates \
+        gnupg
 
 WORKDIR /src
 
 # Download from GitHub releases (squid-cache.org no longer hosts v7+ tarballs)
 # Tag format: SQUID_7_5 (dots replaced by underscores)
+# GPG verification: fetch signing key from squid-cache.org and verify .asc
 RUN --mount=type=secret,id=ca-certs,required=false \
     if [ -f /run/secrets/ca-certs ]; then cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt; fi \
  && SQUID_TAG="SQUID_$(echo "${SQUID_VERSION}" | tr '.' '_')" \
  && curl -fsSL "https://github.com/squid-cache/squid/releases/download/${SQUID_TAG}/squid-${SQUID_VERSION}.tar.xz" -o squid.tar.xz \
  && curl -fsSL "https://github.com/squid-cache/squid/releases/download/${SQUID_TAG}/squid-${SQUID_VERSION}.tar.xz.asc" -o squid.tar.xz.asc \
+ && GNUPGHOME="$(mktemp -d)" && export GNUPGHOME \
+ && curl -fsSL "https://www.squid-cache.org/pgp.asc" | gpg --batch --import \
+ && gpg --batch --verify squid.tar.xz.asc squid.tar.xz \
+ && rm -rf "$GNUPGHOME" squid.tar.xz.asc \
  && tar -xJf squid.tar.xz \
  && mv "squid-${SQUID_VERSION}" squid
 
@@ -163,29 +169,29 @@ LABEL org.opencontainers.image.title="squid-hardened" \
       org.opencontainers.image.source="https://github.com/jbsky/squid-hardened"
 
 # User accounts (for USER directive and getpwuid lookups via musl)
-COPY --from=prep /etc/passwd /etc/passwd
-COPY --from=prep /etc/group  /etc/group
+COPY --link --from=prep /etc/passwd /etc/passwd
+COPY --link --from=prep /etc/group  /etc/group
 
 # Dynamic linker (musl) + shared libraries
-COPY --from=prep /lib/ /lib/
-COPY --from=prep /usr/lib/ /usr/lib/
+COPY --link --from=prep /lib/ /lib/
+COPY --link --from=prep /usr/lib/ /usr/lib/
 
 # Squid binary + data files (error pages, icons, mime.conf)
-COPY --from=prep /usr/sbin/squid /usr/sbin/squid
-COPY --from=prep /usr/share/squid/ /usr/share/squid/
+COPY --link --from=prep /usr/sbin/squid /usr/sbin/squid
+COPY --link --from=prep /usr/share/squid/ /usr/share/squid/
 
 # Default config (overridden by volume mount at runtime)
-COPY --from=prep /etc/squid/ /etc/squid/
+COPY --link --from=prep /etc/squid/ /etc/squid/
 
 # TLS trust store + timezone data
-COPY --from=prep /etc/ssl/ /etc/ssl/
-COPY --from=prep /usr/share/zoneinfo/ /usr/share/zoneinfo/
+COPY --link --from=prep /etc/ssl/ /etc/ssl/
+COPY --link --from=prep /usr/share/zoneinfo/ /usr/share/zoneinfo/
 
 # PID 1 — tini-static (no musl dependency for PID 1 reliability)
-COPY --from=prep /sbin/tini-static /sbin/tini
+COPY --link --from=prep /sbin/tini-static /sbin/tini
 
 # Go init binary (static, entrypoint + healthcheck + setup-dirs)
-COPY --from=gobuilder /init /usr/local/bin/init
+COPY --link --from=gobuilder /init /usr/local/bin/init
 
 # Create runtime directories with correct ownership (no shell needed)
 RUN ["/usr/local/bin/init", "--setup-dirs"]

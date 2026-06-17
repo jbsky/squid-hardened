@@ -13,7 +13,8 @@ FROM alpine:${ALPINE_VERSION} AS builder
 ARG CICAP_VERSION
 ARG SQUIDCLAMAV_VERSION
 
-ENV CFLAGS="-O2 -fstack-protector-strong -fPIE -D_FORTIFY_SOURCE=2" \
+ENV CFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIE -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security" \
+    CXXFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIE -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security" \
     LDFLAGS="-Wl,-z,relro,-z,now,-z,noexecstack -pie"
 
 # -- APK installs split to stay within proxy 240s timeout --
@@ -123,32 +124,34 @@ FROM scratch
 
 LABEL org.opencontainers.image.title="c-icap-hardened" \
       org.opencontainers.image.description="c-icap + squidclamav FROM scratch, non-root, zero shell" \
-      org.opencontainers.image.licenses="LGPL-2.1-or-later"
+      org.opencontainers.image.vendor="jbsky" \
+      org.opencontainers.image.licenses="LGPL-2.1-or-later" \
+      org.opencontainers.image.source="https://github.com/jbsky/c-icap-hardened"
 
 # User accounts
-COPY --from=prep /etc/passwd /etc/passwd
-COPY --from=prep /etc/group  /etc/group
+COPY --link --from=prep /etc/passwd /etc/passwd
+COPY --link --from=prep /etc/group  /etc/group
 
 # Dynamic linker (musl) + shared libraries
-COPY --from=prep /lib/ /lib/
-COPY --from=prep /usr/lib/ /usr/lib/
+COPY --link --from=prep /lib/ /lib/
+COPY --link --from=prep /usr/lib/ /usr/lib/
 
 # c-icap binary + modules
-COPY --from=prep /usr/bin/c-icap /usr/bin/c-icap
-COPY --from=prep /usr/share/c_icap/ /usr/share/c_icap/
+COPY --link --from=prep /usr/bin/c-icap /usr/bin/c-icap
+COPY --link --from=prep /usr/share/c_icap/ /usr/share/c_icap/
 
 # Config (with correct ownership from prep stage)
-COPY --from=prep /etc/c-icap/ /etc/c-icap/
+COPY --link --from=prep /etc/c-icap/ /etc/c-icap/
 
 # TLS trust store + timezone data
-COPY --from=prep /etc/ssl/ /etc/ssl/
-COPY --from=prep /usr/share/zoneinfo/ /usr/share/zoneinfo/
+COPY --link --from=prep /etc/ssl/ /etc/ssl/
+COPY --link --from=prep /usr/share/zoneinfo/ /usr/share/zoneinfo/
 
 # PID 1 — tini-static
-COPY --from=prep /sbin/tini-static /sbin/tini
+COPY --link --from=prep /sbin/tini-static /sbin/tini
 
 # Go init binary (static, entrypoint + healthcheck + setup-dirs)
-COPY --from=gobuilder /init /usr/local/bin/init
+COPY --link --from=gobuilder /init /usr/local/bin/init
 
 # Create runtime directories with correct ownership (no shell needed)
 RUN ["/usr/local/bin/init", "--setup-dirs"]
