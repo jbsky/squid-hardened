@@ -345,10 +345,17 @@ jobs:
         uses: sigstore/cosign-installer@v3
 
       - name: Sign manifest (OIDC keyless)
+        env:
+          HAS_DOCKERHUB: ${{ secrets.DOCKERHUB_TOKEN != '' }}
+          DOCKERHUB_NS: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
           set -euo pipefail
           IMAGE="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}"
           cosign sign --yes "${IMAGE}@${{ steps.manifest.outputs.digest }}"
+          if [ "$HAS_DOCKERHUB" = "true" ]; then
+            COSIGN_REPOSITORY="${IMAGE}" \
+              cosign sign --yes "docker.io/${DOCKERHUB_NS}/${{ matrix.image.name }}@${{ steps.manifest.outputs.digest }}"
+          fi
 
       - name: Detect scan platform
         id: scan-platform
@@ -617,10 +624,17 @@ jobs:
         uses: sigstore/cosign-installer@v3
 
       - name: Sign manifest (OIDC keyless)
+        env:
+          HAS_DOCKERHUB: ${{ secrets.DOCKERHUB_TOKEN != '' }}
+          DOCKERHUB_NS: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
           set -euo pipefail
           IMAGE="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}"
           cosign sign --yes "${IMAGE}@${{ steps.manifest.outputs.digest }}"
+          if [ "$HAS_DOCKERHUB" = "true" ]; then
+            COSIGN_REPOSITORY="${IMAGE}" \
+              cosign sign --yes "docker.io/${DOCKERHUB_NS}/${{ matrix.image.name }}@${{ steps.manifest.outputs.digest }}"
+          fi
 
       - name: Detect scan platform
         id: scan-platform

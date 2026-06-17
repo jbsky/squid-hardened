@@ -56,16 +56,17 @@ WORKDIR /src
 
 # Download from GitHub releases (squid-cache.org no longer hosts v7+ tarballs)
 # Tag format: SQUID_7_5 (dots replaced by underscores)
-# GPG verification: fetch signing key from squid-cache.org and verify .asc
+# GPG verification: use pinned signing key from repo (squid-cache.org TLS unreliable)
+COPY squid-cache.pgp.asc /tmp/squid-cache.pgp.asc
 RUN --mount=type=secret,id=ca-certs,required=false \
     if [ -f /run/secrets/ca-certs ]; then cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt; fi \
  && SQUID_TAG="SQUID_$(echo "${SQUID_VERSION}" | tr '.' '_')" \
  && curl -fsSL "https://github.com/squid-cache/squid/releases/download/${SQUID_TAG}/squid-${SQUID_VERSION}.tar.xz" -o squid.tar.xz \
  && curl -fsSL "https://github.com/squid-cache/squid/releases/download/${SQUID_TAG}/squid-${SQUID_VERSION}.tar.xz.asc" -o squid.tar.xz.asc \
  && GNUPGHOME="$(mktemp -d)" && export GNUPGHOME \
- && curl -fsSL "https://www.squid-cache.org/pgp.asc" | gpg --batch --import \
+ && gpg --batch --import /tmp/squid-cache.pgp.asc \
  && gpg --batch --verify squid.tar.xz.asc squid.tar.xz \
- && rm -rf "$GNUPGHOME" squid.tar.xz.asc \
+ && rm -rf "$GNUPGHOME" squid.tar.xz.asc /tmp/squid-cache.pgp.asc \
  && tar -xJf squid.tar.xz \
  && mv "squid-${SQUID_VERSION}" squid
 
@@ -166,7 +167,9 @@ LABEL org.opencontainers.image.title="squid-hardened" \
       org.opencontainers.image.description="Squid 7 FROM scratch — SSL Bump + ICAP, non-root, zero shell" \
       org.opencontainers.image.vendor="jbsky" \
       org.opencontainers.image.licenses="GPL-2.0-or-later" \
-      org.opencontainers.image.source="https://github.com/jbsky/squid-hardened"
+      org.opencontainers.image.source="https://github.com/jbsky/squid-hardened" \
+      security.hardening.tier="platine" \
+      security.hardening.features="from-scratch,go-init,tini-pid1,zero-shell,non-root,compiler-hardening,cosign-signed,sbom,slsa-provenance"
 
 # User accounts (for USER directive and getpwuid lookups via musl)
 COPY --link --from=prep /etc/passwd /etc/passwd
