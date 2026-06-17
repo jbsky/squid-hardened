@@ -18,35 +18,56 @@ Deux modes opérationnels :
 ## Arborescence
 
 ```
-squid-stack/
-├── docker-compose.yml        # orchestrateur avec profils
-├── .env.example              # variables
-├── squid/                    # image Squid + 2 confs
+stack-squid/
+├── docker-compose.yml            # orchestrateur avec profils
+├── docker-compose.dhi.yml        # variante registry privee
+├── Makefile                      # raccourcis dev
+├── versions.json                 # versions trackees
+├── squid/                        # image Squid
+│   ├── Dockerfile                # Multi-stage (Alpine → FROM scratch)
+│   ├── go.mod + init.go          # Go static init binary
+│   ├── squid-explicit.conf       # config mode explicite + SSL Bump
+│   ├── squid-transparent.conf    # config mode intercept
+│   ├── squid-vyos.conf           # config VyOS production
+│   ├── squid.yaml                # Squid YAML config format
+│   ├── squid-cache.pgp.asc      # cle GPG embarquee
+│   ├── conf.d/nobump_domains.acl # domaines sans SSL Bump
+│   └── nobump_domains.acl        # ACL legacy
+├── clamav/                       # image ClamAV
 │   ├── Dockerfile
-│   ├── entrypoint.sh
-│   ├── squid-explicit.conf
-│   ├── squid-transparent.conf
-│   └── nobump_domains.acl
-├── clamav/                   # image ClamAV
-│   ├── Dockerfile
-│   ├── entrypoint.sh
+│   ├── go.mod + init.go          # Go static init binary
 │   ├── clamd.conf
-│   └── freshclam.conf
-├── c-icap/                   # image C-ICAP + squidclamav
+│   ├── freshclam.conf
+│   └── clamav.yaml
+├── c-icap/                       # image C-ICAP + squidclamav
 │   ├── Dockerfile
-│   ├── entrypoint.sh
+│   ├── go.mod + init.go          # Go static init binary
 │   ├── c-icap.conf
+│   ├── c-icap.yaml
 │   └── squidclamav.conf
-├── vyos/                     # configs à appliquer sur VyOS
-│   ├── vyos-transparent.config
-│   ├── vyos-explicit.config
+├── vyos/                         # configs VyOS
+│   ├── vyos-transparent.config   # DNAT simple
+│   ├── vyos-explicit.config      # WPAD + SSL Bump
+│   ├── vyos-pbr-intercept.config # PBR + in-container REDIRECT
+│   ├── squid-redirect.service    # systemd unit (nft REDIRECT injection)
 │   └── wpad-example.dat
 ├── scripts/
-│   ├── generate-ca.sh        # crée la CA SSL Bump
-│   ├── deploy.sh             # build / up / down / scan / sbom
-│   └── test-eicar.sh         # validation chaîne ICAP
-├── certs/                    # généré : bump.pem / bump.crt / dhparam.pem
-└── docs/                     # documentation détaillée
+│   ├── generate-ca.sh            # cree la CA SSL Bump
+│   ├── check-versions.sh         # detection versions upstream
+│   ├── deploy.sh                 # build / up / down / scan / sbom
+│   └── test-eicar.sh             # validation chaine ICAP
+├── docs/                         # documentation detaillee
+│   ├── vyos-transparent-proxy.md # guide interception PBR (EN)
+│   ├── vyos-transparent-proxy.fr.md # idem (FR)
+│   ├── architecture.md
+│   ├── hardening.md
+│   ├── vyos-howto.md
+│   ├── ca-deployment.md
+│   └── ci-secrets.md
+└── .github/workflows/
+    ├── build-push.yml            # Build + sign + scan + release
+    ├── version-check.yml         # Detection versions upstream
+    └── security-audit.yml        # Weekly Trivy + Grype + cosign
 ```
 
 ## Pré-requis

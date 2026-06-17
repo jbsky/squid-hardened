@@ -1,0 +1,24 @@
+[Unit]
+Description=Inject nftables REDIRECT into squid container netns
+After=vyos-container-squid.service
+BindsTo=vyos-container-squid.service
+Wants=vyos-container-squid.service
+PartOf=vyos-container-squid.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=/bin/sleep 3
+ExecStart=/bin/bash -c '\
+  PID=$(podman inspect squid --format "{{.State.Pid}}") && \
+  nsenter -t $PID -n nft flush ruleset && \
+  nsenter -t $PID -n nft add table ip nat && \
+  nsenter -t $PID -n nft add chain ip nat prerouting "{ type nat hook prerouting priority dstnat; policy accept; }" && \
+  nsenter -t $PID -n nft add rule ip nat prerouting tcp dport 80 redirect to :3129 && \
+  nsenter -t $PID -n nft add rule ip nat prerouting tcp dport 443 redirect to :3131'
+ExecStop=/bin/bash -c '\
+  PID=$(podman inspect squid --format "{{.State.Pid}}" 2>/dev/null) && \
+  nsenter -t $PID -n nft flush ruleset 2>/dev/null || true'
+
+[Install]
+WantedBy=multi-user.target
