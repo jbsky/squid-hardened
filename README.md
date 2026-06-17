@@ -1,12 +1,12 @@
 # Stack Squid + C-ICAP + ClamAV hardenee pour VyOS
 
-[![Build](https://github.com/jbsky/stack-squid/actions/workflows/build-push.yml/badge.svg)](https://github.com/jbsky/stack-squid/actions/workflows/build-push.yml)
+[![Build](https://github.com/jbsky/squid-hardened/actions/workflows/build-push.yml/badge.svg)](https://github.com/jbsky/squid-hardened/actions/workflows/build-push.yml)
 [![Docker Hub squid](https://img.shields.io/docker/v/jbsky/squid-hardened?sort=semver&label=squid)](https://hub.docker.com/r/jbsky/squid-hardened)
 [![Docker Hub c-icap](https://img.shields.io/docker/v/jbsky/c-icap-hardened?sort=semver&label=c-icap)](https://hub.docker.com/r/jbsky/c-icap-hardened)
 [![Docker Hub clamav](https://img.shields.io/docker/v/jbsky/clamav-hardened?sort=semver&label=clamav)](https://hub.docker.com/r/jbsky/clamav-hardened)
-[![Hardening](https://img.shields.io/badge/hardening-platine-blueviolet)](https://github.com/jbsky/stack-squid#security--verification)
+[![Hardening](https://img.shields.io/badge/hardening-platine-blueviolet)](https://github.com/jbsky/squid-hardened#security--verification)
 
-Stack proxy filtrant antiviral, conteneurisée en **Docker Hardened Image** (multi-stage, non-root, capabilities drop, RELRO/PIE, strip, tini, distroless-style Alpine), prête à remplacer un proxy Squid existant.
+Stack proxy filtrant antiviral, conteneurisee en **Docker Hardened Image** (FROM scratch, Go static init, tini PID 1, non-root, RELRO/PIE/SSP/FORTIFY, zero shell), prete a remplacer un proxy Squid existant.
 
 Deux modes opérationnels :
 
@@ -129,8 +129,6 @@ Adapter impérativement les IP et interfaces (`eth0/1/2`, sous-réseaux) à votr
 | Healthcheck | ✅ | ✅ | ✅ |
 | OCI labels | ✅ | ✅ | ✅ |
 | SBOM (via syft) | ✅ | ✅ | ✅ |
-
-Pour aller plus loin : passer à **Chainguard Wolfi** ou **Distroless** en base finale (changement trivial du `FROM` du stage runtime).
 
 ## Logs
 

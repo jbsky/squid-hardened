@@ -97,14 +97,13 @@ L'isolation est meilleure en bridge dédié (`br-proxy`). Les ports nécessaires
 - Les directives `ssl_bump` n'ont aucun sens en mode transparent (sans CA)
 - Confs séparées = lecture plus facile, lint plus simple, moins de bugs
 
-### Pourquoi Alpine et pas Distroless ?
+### Pourquoi FROM scratch ?
 
-Alpine permet :
-- `apk` pour gérer les dépendances runtime (ClamAV pose problème en distroless)
-- Une shell minimale pour l'entrypoint (initialisation cache, SSL DB)
-- Footprint < 100 Mo final
-
-Pour aller plus loin : ré-écrire les entrypoints en Go statique → final stage `gcr.io/distroless/static`.
+Les images finales sont construites `FROM scratch` (tier Platine) :
+- Zero shell, zero package manager, zero surface d'attaque residuelle
+- Entrypoints Go statiques (init + healthcheck, stdlib uniquement)
+- tini-static comme PID 1 (signal forwarding + zombie reaping)
+- Seules les libs runtime strictement necessaires sont copiees depuis le stage builder
 
 ## Capacité
 

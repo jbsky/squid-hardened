@@ -189,10 +189,12 @@ Sources : `squid/init.go`, `c-icap/init.go`, `clamav/init.go` (stdlib uniquement
 
 ## 11. Améliorations futures
 
-- [x] ~~Entrypoints Go~~ → **fait** (Tier 2, voir section 10)
-- [ ] Migrer `runtime` vers Chainguard Wolfi (`cgr.dev/chainguard/wolfi-base`) ou Distroless
+- [x] ~~Entrypoints Go~~ → **fait** (Tier Platine, voir section 10)
+- [x] ~~FROM scratch~~ → **fait** (zero shell, zero pkg manager)
+- [x] ~~Signature cosign~~ → **fait** (OIDC keyless via GitHub Actions)
 - [ ] Profil **seccomp** custom (le défaut est désactivé dans le compose pour debug)
 - [ ] Profil **AppArmor** / SELinux dédié
-- [ ] Pinner les paquets apk par hash (`apk add foo=1.2.3-r0`)
+- [ ] Pinner les paquets apk par hash dans les stages builder (`apk add foo=1.2.3-r0`)
 - [ ] Build reproductible (`SOURCE_DATE_EPOCH`)
-- [ ] Signature cosign + politique admission (Kyverno) sur cluster k8s
+- [ ] Runtime immutabilité (`--read-only` rootfs + tmpfs)
+- [ ] Déploiement par digest (pin `@sha256:` au lieu de `:latest`)
