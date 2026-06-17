@@ -19,8 +19,8 @@ ENV CFLAGS="-O2 -fstack-protector-strong -fPIE -D_FORTIFY_SOURCE=2" \
 # -- APK installs split to stay within proxy 240s timeout --
 
 # 1/2  Inject CA + switch to HTTP repos + core build toolchain + download tools
-RUN --mount=type=secret,id=ca-certs \
-    cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt \
+RUN --mount=type=secret,id=ca-certs,required=false \
+    [ -f /run/secrets/ca-certs ] && cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt || true \
  && sed -i 's|https://|http://|g' /etc/apk/repositories \
  && apk add \
         build-base autoconf automake libtool pkgconf \
@@ -40,8 +40,8 @@ RUN apk add \
 WORKDIR /src
 
 # Téléchargement c-icap depuis SourceForge (miroir HTTPS)
-RUN --mount=type=secret,id=ca-certs \
-    cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt \
+RUN --mount=type=secret,id=ca-certs,required=false \
+    [ -f /run/secrets/ca-certs ] && cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt || true \
  && curl -fsSL "https://sourceforge.net/projects/c-icap/files/c-icap/0.5.x/c_icap-${CICAP_VERSION}.tar.gz/download" -o c-icap.tar.gz \
  && tar -xzf c-icap.tar.gz \
  && mv "c_icap-${CICAP_VERSION}" c-icap
@@ -58,8 +58,8 @@ RUN ./configure \
 
 # squidclamav
 WORKDIR /src
-RUN --mount=type=secret,id=ca-certs \
-    cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt \
+RUN --mount=type=secret,id=ca-certs,required=false \
+    [ -f /run/secrets/ca-certs ] && cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt || true \
  && curl -fsSL "https://github.com/darold/squidclamav/archive/refs/tags/v${SQUIDCLAMAV_VERSION}.tar.gz" -o sc.tar.gz \
  && tar -xzf sc.tar.gz \
  && mv "squidclamav-${SQUIDCLAMAV_VERSION}" squidclamav
@@ -115,7 +115,7 @@ RUN chown root:cicap /etc/c-icap/*.conf \
  && chmod 0640       /etc/c-icap/*.conf
 
 # Strip APK/package-manager artifacts
-RUN rm -rf /lib/apk /var/cache/apk /etc/apk /sbin/apk
+RUN rm -rf /lib/apk /lib/libapk* /var/cache/apk /etc/apk /sbin/apk
 
 # ---------- Stage 4 : FROM scratch (final hardened image) -----------
 FROM scratch

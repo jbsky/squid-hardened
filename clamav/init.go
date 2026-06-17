@@ -19,6 +19,104 @@ import (
 	"time"
 )
 
+// diagVolume logs ownership, permissions and contents of a directory.
+// Helps diagnose bind-mount issues (sgid, uid mismatch, etc.).
+func diagVolume(path string) {
+	fmt.Printf("[init][diag] process uid=%d gid=%d\n", os.Getuid(), os.Getgid())
+	info, err := os.Stat(path)
+	if err != nil {
+		fmt.Printf("[init][diag] stat %s: %v\n", path, err)
+		return
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if ok {
+		fmt.Printf("[init][diag] stat %s: mode=%04o uid=%d gid=%d\n", path, info.Mode().Perm()|os.FileMode(stat.Mode&0xFFFFF000>>12<<12), stat.Uid, stat.Gid)
+	} else {
+		fmt.Printf("[init][diag] stat %s: mode=%s (no syscall info)\n", path, info.Mode())
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		fmt.Printf("[init][diag] readdir %s: %v\n", path, err)
+		return
+	}
+	fmt.Printf("[init][diag] readdir %s: %d entries\n", path, len(entries))
+	for _, e := range entries {
+		ei, _ := e.Info()
+		if ei != nil {
+			fmt.Printf("[init][diag]   %s (size=%d mode=%s)\n", e.Name(), ei.Size(), ei.Mode())
+		} else {
+			fmt.Printf("[init][diag]   %s\n", e.Name())
+		}
+	}
+	// write-test
+	tmp, err := os.CreateTemp(path, ".diag-write-test-*")
+	if err != nil {
+		fmt.Printf("[init][diag] write-test %s: FAILED: %v\n", path, err)
+		return
+	}
+	name := tmp.Name()
+	tmp.Close()
+	os.Remove(name)
+	fmt.Printf("[init][diag] write-test %s: OK\n", path)
+}
+
+// ensureWritable verifies that path is writable by the current process.
+// If not, it attempts chown (requires CAP_CHOWN — usually unavailable as
+// non-root).  On failure it returns an actionable error with the host-side
+// fix command.
+func ensureWritable(path string, uid, gid int) error {
+	// Check the directory exists and is accessible
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("%s: %w\n"+
+			"  If this is a bind-mount, ensure the host directory exists and\n"+
+			"  its parent directories are traversable (mode 0755)",
+			path, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s exists but is not a directory", path)
+	}
+	// Fast path: already writable
+	tmp, err := os.CreateTemp(path, ".write-test-*")
+	if err == nil {
+		name := tmp.Name()
+		tmp.Close()
+		os.Remove(name)
+		return nil
+	}
+	// Not writable — attempt recursive chown (best-effort, requires CAP_CHOWN)
+	fmt.Printf("[init] %s is not writable by uid %d, attempting chown to %d:%d\n", path, os.Getuid(), uid, gid)
+	if chErr := chownRecursive(path, uid, gid); chErr == nil {
+		// Retry write test
+		tmp2, err2 := os.CreateTemp(path, ".write-test-*")
+		if err2 == nil {
+			name := tmp2.Name()
+			tmp2.Close()
+			os.Remove(name)
+			fmt.Printf("[init] fixed ownership of %s to %d:%d\n", path, uid, gid)
+			return nil
+		}
+	}
+	return fmt.Errorf(
+		"%s is not writable by uid %d.\n"+
+			"  Bind-mounted volumes default to root:root on the host.\n"+
+			"  Fix with:\n\n"+
+			"    sudo chown -R %d:%d <host-path-mounted-to%s>\n\n"+
+			"  Then restart the container",
+		path, os.Getuid(), uid, gid, path,
+	)
+}
+
+// chownRecursive applies chown uid:gid to path and all contents.
+func chownRecursive(path string, uid, gid int) error {
+	return filepath.Walk(path, func(name string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		return os.Chown(name, uid, gid)
+	})
+}
+
 const (
 	clamavUID = 4000
 	clamavGID = 4000
@@ -55,6 +153,11 @@ func setupDirs() error {
 		uid  int
 		gid  int
 	}{
+		// Parent dirs first — 0755 root:root so non-root can traverse.
+		{"/var", 0755, 0, 0},
+		{"/var/lib", 0755, 0, 0},
+		{"/var/log", 0755, 0, 0},
+		// Leaf dirs with correct ownership
 		{"/var/lib/clamav", 0750, clamavUID, clamavGID},
 		{"/var/log/clamav", 0750, clamavUID, clamavGID},
 		{"/run/clamav", 0755, clamavUID, clamavGID},
@@ -105,6 +208,10 @@ func entrypoint() error {
 	freshclamConf := "/etc/clamav/freshclam.conf"
 
 	// 1) Initial signature download if DB is empty
+	if err := ensureWritable(dbDir, clamavUID, clamavGID); err != nil {
+		diagVolume(dbDir)
+		return err
+	}
 	if !hasSignatures(dbDir) {
 		fmt.Println("[init] Téléchargement initial des signatures (peut prendre plusieurs minutes)...")
 		cmd := exec.Command("freshclam",
@@ -140,11 +247,18 @@ func entrypoint() error {
 // hasSignatures checks for .cvd or .cld files in the DB directory.
 func hasSignatures(dir string) bool {
 	for _, ext := range []string{"*.cvd", "*.cld"} {
-		matches, _ := filepath.Glob(filepath.Join(dir, ext))
+		pattern := filepath.Join(dir, ext)
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[init][WARN] glob %s: %v\n", pattern, err)
+			continue
+		}
 		if len(matches) > 0 {
+			fmt.Printf("[init] found signatures: %v\n", matches)
 			return true
 		}
 	}
+	fmt.Println("[init] no signatures found in", dir)
 	return false
 }
 

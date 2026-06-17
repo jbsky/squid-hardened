@@ -30,8 +30,6 @@ on:
       - 'squid/**'
       - 'c-icap/**'
       - 'clamav/**'
-  schedule:
-    - cron: '0 4 * * 1'
   workflow_dispatch:
 
 env:
@@ -80,14 +78,34 @@ jobs:
           additional_files: 'squid/entrypoint.sh c-icap/entrypoint.sh clamav/entrypoint.sh'
 
   # -------------------------------------------------------------------
+  #  Check if DHI credentials are configured
+  # -------------------------------------------------------------------
+  check-dhi:
+    name: Check DHI credentials
+    runs-on: ubuntu-latest
+    needs: lint
+    outputs:
+      has-dhi: ${{ steps.check.outputs.has-dhi }}
+    steps:
+      - id: check
+        env:
+          DHI_USER: ${{ secrets.DOCKER_USERNAME }}
+        run: |
+          if [ -n "$DHI_USER" ]; then
+            echo "has-dhi=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-dhi=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # -------------------------------------------------------------------
   #  Validation YAML DHI (parse-check avant le vrai build)
+  #  Skipped if DHI credentials are not configured
   # -------------------------------------------------------------------
   validate-dhi:
     name: Validate DHI YAML
     runs-on: ubuntu-latest
-    needs: lint
-    # Nécessite docker login dhi.io → skip en PR si secrets indispos
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    needs: check-dhi
+    if: needs.check-dhi.outputs.has-dhi == 'true'
     steps:
       - uses: actions/checkout@v4
 
@@ -133,12 +151,13 @@ jobs:
 
   # -------------------------------------------------------------------
   #  Build + Push DHI → ghcr.io (multi-arch, signé, SBOM attaché)
+  #  Skipped if DHI credentials are not configured
   # -------------------------------------------------------------------
   build-dhi:
     name: DHI – ${{ matrix.image.name }}
-    needs: validate-dhi
+    needs: [check-dhi, validate-dhi]
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request'
+    if: startsWith(github.ref, 'refs/tags/v') && needs.check-dhi.outputs.has-dhi == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -185,17 +204,11 @@ jobs:
 
       - name: Extract metadata (tags + labels OCI)
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}
           tags: |
-            type=ref,event=branch
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=sha,format=long
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=schedule,pattern=nightly
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -240,7 +253,7 @@ jobs:
 
       # 5) Scan Trivy + upload SARIF
       - name: Trivy scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}@${{ steps.build.outputs.digest }}
           format: sarif
@@ -281,12 +294,186 @@ jobs:
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
 
   # -------------------------------------------------------------------
+  #  Build + Push Dockerfiles → ghcr.io (fallback when DHI unavailable)
+  # -------------------------------------------------------------------
+  build-dockerfile:
+    name: Build – ${{ matrix.image.name }}
+    needs: check-dhi
+    runs-on: ubuntu-latest
+    # Only runs on tags (not PR/branch push) — DHI secrets NOT available = fallback
+    if: startsWith(github.ref, 'refs/tags/v') && needs.check-dhi.outputs.has-dhi == 'false'
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - name: clamav-hardened
+            dockerfile: clamav/Dockerfile
+            context: clamav/
+            prep-target: builder
+          - name: squid-hardened
+            dockerfile: squid/Dockerfile
+            context: squid/
+            prep-target: prep
+          - name: c-icap-hardened
+            dockerfile: c-icap/Dockerfile
+            context: c-icap/
+            prep-target: prep
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64,amd64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login Docker Hub
+        id: dockerhub-login
+        if: env.HAS_DOCKERHUB == 'true'
+        uses: docker/login-action@v3
+        env:
+          HAS_DOCKERHUB: ${{ secrets.DOCKERHUB_TOKEN != '' }}
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Compute image list
+        id: images
+        env:
+          HAS_DOCKERHUB: ${{ secrets.DOCKERHUB_TOKEN != '' }}
+          DOCKERHUB_NS: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          IMAGES="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}"
+          if [ "$HAS_DOCKERHUB" = "true" ]; then
+            IMAGES="${IMAGES}
+          docker.io/${DOCKERHUB_NS}/${{ matrix.image.name }}"
+          fi
+          echo "list<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$IMAGES" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      # Scan the Alpine prep stage (has OS metadata) to catch CVEs in
+      # shared libraries that Trivy cannot see in the FROM scratch image.
+      - name: Build prep stage (Alpine with runtime deps)
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.dockerfile }}
+          target: ${{ matrix.image.prep-target }}
+          platforms: linux/amd64
+          load: true
+          tags: ${{ matrix.image.name }}-prep:scan
+          cache-from: type=gha,scope=${{ matrix.image.name }}
+
+      - name: Trivy scan prep stage (Alpine CVEs)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ matrix.image.name }}-prep:scan
+          format: sarif
+          output: trivy-${{ matrix.image.name }}-deps.sarif
+          severity: CRITICAL,HIGH
+          exit-code: '0'
+          ignore-unfixed: true
+
+      - name: Upload prep SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-${{ matrix.image.name }}-deps.sarif
+          category: ${{ matrix.image.name }}-deps
+
+      - name: Extract metadata (tags + labels OCI)
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ steps.images.outputs.list }}
+          tags: |
+            type=semver,pattern={{version}}
+
+      - name: Build & Push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          sbom: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: mode=max
+          cache-from: type=gha,scope=${{ matrix.image.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image (OIDC keyless)
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          IMAGE="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}"
+          cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      - name: Trivy scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}@${{ steps.build.outputs.digest }}
+          format: sarif
+          output: trivy-${{ matrix.image.name }}.sarif
+          severity: CRITICAL,HIGH
+          exit-code: '0'
+          ignore-unfixed: true
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-${{ matrix.image.name }}.sarif
+          category: ${{ matrix.image.name }}
+
+      - name: GitHub SLSA Attestation
+        if: "!startsWith(github.ref, 'refs/heads/dependabot/')"
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Summary
+        env:
+          HAS_DOCKERHUB: ${{ secrets.DOCKERHUB_TOKEN != '' }}
+          DOCKERHUB_NS: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          echo "### ${{ matrix.image.name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Digest :** \`${{ steps.build.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}:latest" >> $GITHUB_STEP_SUMMARY
+          if [ "$HAS_DOCKERHUB" = "true" ]; then
+            echo "docker pull docker.io/${DOCKERHUB_NS}/${{ matrix.image.name }}:latest" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+  # -------------------------------------------------------------------
   #  Release sur tag v*.*.* : tarball + checksums
   # -------------------------------------------------------------------
   release:
     name: GitHub Release
-    needs: build-dhi
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-dhi, build-dockerfile]
+    # Run if either build job succeeded (the other is skipped based on DHI secrets)
+    if: always() && startsWith(github.ref, 'refs/tags/v') && (needs.build-dhi.result == 'success' || needs.build-dockerfile.result == 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: write

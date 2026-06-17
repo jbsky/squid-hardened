@@ -34,7 +34,7 @@ RUN chown root:clamav /etc/clamav/clamd.conf /etc/clamav/freshclam.conf \
  && chmod 0640        /etc/clamav/clamd.conf /etc/clamav/freshclam.conf
 
 # Strip APK/package-manager artifacts (won't be copied to scratch)
-RUN rm -rf /lib/apk /var/cache/apk /etc/apk /sbin/apk
+RUN rm -rf /lib/apk /lib/libapk* /var/cache/apk /etc/apk /sbin/apk
 
 # ---------- Stage 2 : Go builder (entrypoint + healthcheck) ---------
 FROM golang:1.26-alpine AS gobuilder
