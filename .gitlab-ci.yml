@@ -174,7 +174,7 @@ build:clamav:
 # fail due to certificate pinning. allow_failure: true makes it advisory.
 .sign-template: &sign-template
   stage: sign
-  image: alpine:3.20
+  image: alpine:3.21
   before_script: []
   services: []
   id_tokens:
@@ -255,7 +255,7 @@ release:tarball:
   stage: release
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
-  image: alpine:3.20
+  image: alpine:3.21
   before_script: []
   services: []
   script:

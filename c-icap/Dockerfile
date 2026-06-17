@@ -3,9 +3,9 @@
 #  4-stage build : compile c-icap + squidclamav -> Go init -> prep -> FROM scratch
 # =====================================================================
 
-ARG ALPINE_VERSION=3.20
-ARG CICAP_VERSION=0.5.13
-ARG SQUIDCLAMAV_VERSION=7.3
+ARG ALPINE_VERSION=3.21
+ARG CICAP_VERSION=0.6.4
+ARG SQUIDCLAMAV_VERSION=7.4
 
 # ---------- Stage 1 : builder ----------------------------------------
 FROM alpine:${ALPINE_VERSION} AS builder
@@ -42,7 +42,7 @@ WORKDIR /src
 # Téléchargement c-icap depuis SourceForge (miroir HTTPS)
 RUN --mount=type=secret,id=ca-certs,required=false \
     [ -f /run/secrets/ca-certs ] && cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt || true \
- && curl -fsSL "https://sourceforge.net/projects/c-icap/files/c-icap/0.5.x/c_icap-${CICAP_VERSION}.tar.gz/download" -o c-icap.tar.gz \
+ && curl -fsSL "https://sourceforge.net/projects/c-icap/files/c-icap/0.6.x/c_icap-${CICAP_VERSION}.tar.gz/download" -o c-icap.tar.gz \
  && tar -xzf c-icap.tar.gz \
  && mv "c_icap-${CICAP_VERSION}" c-icap
 
@@ -96,12 +96,13 @@ RUN sed -i 's|https://|http://|g' /etc/apk/repositories \
         tini-static \
         tzdata
 
-# 2/2  ClamAV + compression + regex libs
+# 2/2  ClamAV + compression + regex libs + libatomic (required by c-icap 0.6.x)
 RUN apk add --no-cache \
         clamav-libs \
         libcurl \
         zlib bzip2 \
         pcre pcre2 \
+        libatomic \
  && addgroup -S -g 4100 cicap \
  && adduser  -S -D -H -G cicap -u 4100 -s /sbin/nologin cicap
 
