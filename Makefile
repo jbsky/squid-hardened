@@ -45,7 +45,7 @@ ps:
 	$(DC) --profile all ps
 
 test:
-	./scripts/test-eicar.sh 127.0.0.1:3128
+	./scripts/test-eicar.sh
 
 scan:
 	./scripts/deploy.sh scan
