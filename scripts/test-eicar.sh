@@ -38,7 +38,7 @@ if [[ -z "$PROXY" ]]; then
 
     # Wait for server ready (direct TCP check via IP)
     echo "[test] Attente du serveur EICAR..."
-    for i in $(seq 1 20); do
+    for _i in $(seq 1 20); do
         if docker run --rm --network "$NETWORK" "${NOPROXY[@]}" \
             curlimages/curl:latest \
             -sf -o /dev/null "http://${EICAR_IP}:8080/eicar.txt" 2>/dev/null; then
