@@ -5,7 +5,7 @@
 
 ARG ALPINE_VERSION=3.21
 ARG CICAP_VERSION=0.6.4
-ARG SQUIDCLAMAV_VERSION=7.4
+ARG SQUIDCLAMAV_VERSION=7.5
 
 # ---------- Stage 1 : builder ----------------------------------------
 FROM alpine:${ALPINE_VERSION} AS builder
