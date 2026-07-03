@@ -95,7 +95,7 @@ current_alpine=$(grep '"alpine"' "$VERSIONS_FILE" | sed 's/.*: *"//;s/".*//')
 printf 'Checking upstream versions...\n'
 
 latest_squid=$(squid_latest) || latest_squid="$current_squid"
-latest_cicap=$(github_latest_release "c-icap/c-icap-server" "CI_") || latest_cicap="$current_cicap"
+latest_cicap=$(github_latest_release "c-icap/c-icap-server" "C_ICAP_") || latest_cicap="$current_cicap"
 latest_squidclamav=$(github_latest_release "darold/squidclamav" "v") || latest_squidclamav="$current_squidclamav"
 latest_clamav=$(clamav_latest "$current_alpine") || latest_clamav="$current_clamav"
 
