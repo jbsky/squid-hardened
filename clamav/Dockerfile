@@ -4,10 +4,14 @@
 #  No compilation needed (apk packages), so builder IS the prep stage.
 # =====================================================================
 
+# ALPINE_VERSION kept for check-versions.sh/versions.json reference only --
+# the FROM line below pins tag+digest together as a literal so a version
+# bump requires deliberately re-resolving the digest, not a silent drift
+# if this ARG changes without the pin being updated to match.
 ARG ALPINE_VERSION=3.23
 
 # ---------- Stage 1 : builder (install + prepare filesystem) ---------
-FROM alpine:${ALPINE_VERSION} AS builder
+FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40 AS builder
 
 # -- APK installs split to stay within proxy 240s timeout --
 
@@ -37,7 +41,7 @@ RUN chown root:clamav /etc/clamav/clamd.conf /etc/clamav/freshclam.conf \
 RUN rm -rf /lib/apk /lib/libapk* /var/cache/apk /etc/apk /sbin/apk
 
 # ---------- Stage 2 : Go builder (entrypoint + healthcheck) ---------
-FROM golang:1.26-alpine AS gobuilder
+FROM golang:1.26-alpine@sha256:3ad57304ad93bbec8548a0437ad9e06a455660655d9af011d58b993f6f615648 AS gobuilder
 WORKDIR /build
 COPY go.mod init.go ./
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags='-s -w' -o /init .

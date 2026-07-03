@@ -10,10 +10,14 @@
 # =====================================================================
 
 ARG SQUID_VERSION=7.6
+# ALPINE_VERSION kept for check-versions.sh/versions.json reference only --
+# the FROM lines below pin tag+digest together as a literal so a version
+# bump requires deliberately re-resolving the digest, not a silent drift
+# if this ARG changes without the pin being updated to match.
 ARG ALPINE_VERSION=3.21
 
 # ---------- Stage 1 : builder ----------------------------------------
-FROM alpine:${ALPINE_VERSION} AS builder
+FROM alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d AS builder
 
 ARG SQUID_VERSION
 SHELL ["/bin/ash", "-eo", "pipefail", "-c"]
@@ -127,13 +131,13 @@ RUN rm -rf /out/var/run \
  && cp /out/etc/squid/mime.conf /out/usr/share/squid/mime.conf
 
 # ---------- Stage 2 : Go builder (entrypoint + healthcheck) ---------
-FROM golang:1.26-alpine AS gobuilder
+FROM golang:1.26-alpine@sha256:3ad57304ad93bbec8548a0437ad9e06a455660655d9af011d58b993f6f615648 AS gobuilder
 WORKDIR /build
 COPY go.mod init.go ./
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags='-s -w' -o /init .
 
 # ---------- Stage 3 : prep (assemble runtime filesystem) ------------
-FROM alpine:${ALPINE_VERSION} AS prep
+FROM alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d AS prep
 
 # -- Runtime APK installs split to stay within proxy 240s timeout --
 

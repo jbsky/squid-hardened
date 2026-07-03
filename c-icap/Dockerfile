@@ -3,6 +3,10 @@
 #  4-stage build : compile c-icap + squidclamav -> Go init -> prep -> FROM scratch
 # =====================================================================
 
+# ALPINE_VERSION kept for check-versions.sh/versions.json reference only --
+# the FROM lines below pin tag+digest together as a literal so a version
+# bump requires deliberately re-resolving the digest, not a silent drift
+# if this ARG changes without the pin being updated to match.
 ARG ALPINE_VERSION=3.21
 ARG CICAP_VERSION=0.6.5
 ARG CICAP_SHA256=82e457b3f234d56f537c70ec76a1d51ce8f6a55522592f2df07fc2557856f184
@@ -10,7 +14,7 @@ ARG SQUIDCLAMAV_VERSION=7.5
 ARG SQUIDCLAMAV_SHA256=4d076b692e45cb78b384b5c4a1c63f755d565bdc01c732cc5ddbb8b4f046ceae
 
 # ---------- Stage 1 : builder ----------------------------------------
-FROM alpine:${ALPINE_VERSION} AS builder
+FROM alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d AS builder
 
 ARG CICAP_VERSION
 ARG CICAP_SHA256
@@ -89,13 +93,13 @@ RUN find /out -type f \( -name '*.so*' -o -perm -111 \) -exec sh -c 'file "$1" 2
 RUN rm -rf /out/var/run
 
 # ---------- Stage 2 : Go builder (entrypoint + healthcheck) ---------
-FROM golang:1.26-alpine AS gobuilder
+FROM golang:1.26-alpine@sha256:3ad57304ad93bbec8548a0437ad9e06a455660655d9af011d58b993f6f615648 AS gobuilder
 WORKDIR /build
 COPY go.mod init.go ./
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags='-s -w' -o /init .
 
 # ---------- Stage 3 : prep (assemble runtime filesystem) ------------
-FROM alpine:${ALPINE_VERSION} AS prep
+FROM alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d AS prep
 
 # -- Runtime APK installs split to stay within proxy 240s timeout --
 
