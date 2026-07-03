@@ -113,10 +113,14 @@ RUN ./configure \
 RUN make -j"$(nproc)" \
  && make install DESTDIR=/out
 
-# Strip binaries (|| true: cert helpers may not exist for all build configs)
-# hadolint ignore=SC2046
-RUN strip /out/usr/sbin/squid \
-          /out/usr/lib/squid/*-cert.d || true
+# Strip the main binary unconditionally (must always succeed).
+RUN strip /out/usr/sbin/squid
+
+# Cert helpers are optional depending on build config, so their strip may
+# legitimately find nothing — but don't blanket-swallow real strip failures.
+RUN for f in /out/usr/lib/squid/*-cert.d; do \
+      [ -e "$f" ] && strip "$f"; \
+    done; true
 
 # Remove /out/var/run (conflicts with /run symlink) + copy mime.conf
 RUN rm -rf /out/var/run \

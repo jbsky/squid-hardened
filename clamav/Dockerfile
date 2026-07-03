@@ -49,9 +49,9 @@ LABEL org.opencontainers.image.title="clamav-hardened" \
       org.opencontainers.image.description="ClamAV FROM scratch, non-root, zero shell" \
       org.opencontainers.image.vendor="jbsky" \
       org.opencontainers.image.licenses="GPL-2.0-or-later" \
-      org.opencontainers.image.source="https://github.com/jbsky/clamav-hardened" \
+      org.opencontainers.image.source="https://github.com/jbsky/squid-hardened" \
       security.hardening.tier="platine" \
-      security.hardening.features="from-scratch,go-init,tini-pid1,zero-shell,non-root,compiler-hardening,cosign-signed,sbom,slsa-provenance"
+      security.hardening.features="from-scratch,go-init,tini-pid1,zero-shell,non-root,cosign-signed,sbom,slsa-provenance"
 
 # User accounts
 COPY --link --from=builder /etc/passwd /etc/passwd

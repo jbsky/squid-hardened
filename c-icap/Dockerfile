@@ -5,13 +5,17 @@
 
 ARG ALPINE_VERSION=3.21
 ARG CICAP_VERSION=0.6.4
+ARG CICAP_SHA256=284cd9ebdde3ef4f46ed23c1c0427e28399ba1eb4f236a1a6cfd9e38176669bc
 ARG SQUIDCLAMAV_VERSION=7.4
+ARG SQUIDCLAMAV_SHA256=93c2c277f5e1fc334afd4794ef35faf0ada6fbd7acdd7085f37618d4eff53c1f
 
 # ---------- Stage 1 : builder ----------------------------------------
 FROM alpine:${ALPINE_VERSION} AS builder
 
 ARG CICAP_VERSION
+ARG CICAP_SHA256
 ARG SQUIDCLAMAV_VERSION
+ARG SQUIDCLAMAV_SHA256
 
 ENV CFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIE -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security" \
     CXXFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIE -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security" \
@@ -44,6 +48,9 @@ WORKDIR /src
 RUN --mount=type=secret,id=ca-certs,required=false \
     [ -f /run/secrets/ca-certs ] && cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt || true \
  && curl -fsSL "https://sourceforge.net/projects/c-icap/files/c-icap/0.6.x/c_icap-${CICAP_VERSION}.tar.gz/download" -o c-icap.tar.gz \
+ && printf '%s  c-icap.tar.gz\n' "${CICAP_SHA256}" > c-icap.tar.gz.sha256 \
+ && sha256sum -c c-icap.tar.gz.sha256 \
+ && rm c-icap.tar.gz.sha256 \
  && tar -xzf c-icap.tar.gz \
  && mv "c_icap-${CICAP_VERSION}" c-icap
 
@@ -62,6 +69,9 @@ WORKDIR /src
 RUN --mount=type=secret,id=ca-certs,required=false \
     [ -f /run/secrets/ca-certs ] && cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt || true \
  && curl -fsSL "https://github.com/darold/squidclamav/archive/refs/tags/v${SQUIDCLAMAV_VERSION}.tar.gz" -o sc.tar.gz \
+ && printf '%s  sc.tar.gz\n' "${SQUIDCLAMAV_SHA256}" > sc.tar.gz.sha256 \
+ && sha256sum -c sc.tar.gz.sha256 \
+ && rm sc.tar.gz.sha256 \
  && tar -xzf sc.tar.gz \
  && mv "squidclamav-${SQUIDCLAMAV_VERSION}" squidclamav
 
@@ -126,7 +136,7 @@ LABEL org.opencontainers.image.title="c-icap-hardened" \
       org.opencontainers.image.description="c-icap + squidclamav FROM scratch, non-root, zero shell" \
       org.opencontainers.image.vendor="jbsky" \
       org.opencontainers.image.licenses="LGPL-2.1-or-later" \
-      org.opencontainers.image.source="https://github.com/jbsky/c-icap-hardened" \
+      org.opencontainers.image.source="https://github.com/jbsky/squid-hardened" \
       security.hardening.tier="platine" \
       security.hardening.features="from-scratch,go-init,tini-pid1,zero-shell,non-root,compiler-hardening,cosign-signed,sbom,slsa-provenance"
 

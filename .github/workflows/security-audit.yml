@@ -64,7 +64,7 @@ jobs:
       - name: Grype scan
         run: |
           grype ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}:latest \
-                --fail-on high --only-fixed || true
+                --fail-on high --only-fixed
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3

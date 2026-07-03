@@ -1,7 +1,9 @@
 {
   "squid": "7.6",
   "c-icap": "0.6.4",
+  "c-icap_sha256": "284cd9ebdde3ef4f46ed23c1c0427e28399ba1eb4f236a1a6cfd9e38176669bc",
   "squidclamav": "7.4",
-  "clamav": "1.5.2",
+  "squidclamav_sha256": "93c2c277f5e1fc334afd4794ef35faf0ada6fbd7acdd7085f37618d4eff53c1f",
+  "clamav": "1.4.2",
   "alpine": "3.21"
 }

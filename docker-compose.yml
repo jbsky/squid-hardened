@@ -31,6 +31,7 @@ services:
 
   clamav:
     <<: *common-security
+    read_only: true    # tested: signature DB (volume) + /tmp,/run (tmpfs) cover all writes
     build:
       context: ./clamav
       dockerfile: Dockerfile
@@ -58,6 +59,7 @@ services:
 
   c-icap:
     <<: *common-security
+    read_only: true    # tested: only /tmp,/run/c-icap (tmpfs) + log volume are written
     build:
       context: ./c-icap
       dockerfile: Dockerfile

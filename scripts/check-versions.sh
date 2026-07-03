@@ -46,13 +46,18 @@ github_latest_release() {
   echo "$tag" | sed "s/^${prefix}//"
 }
 
-# Extract latest ClamAV stable from GitHub (skip RC/beta)
+# ClamAV is installed via `apk add clamav` (not compiled from source), so the
+# only version that can ever ship in the image is whatever the pinned Alpine
+# branch carries in its community repo. Tracking Cisco-Talos GitHub releases
+# here is wrong: it produces a version tag that the image never actually
+# contains. Query the Alpine APKINDEX for the pinned branch instead.
 clamav_latest() {
-  url="https://api.github.com/repos/Cisco-Talos/clamav/releases?per_page=20"
+  alpine_branch="$1"
+  url="https://dl-cdn.alpinelinux.org/alpine/v${alpine_branch}/community/x86_64/APKINDEX.tar.gz"
   curl -fsSL --retry 3 "$url" 2>/dev/null \
-    | grep '"tag_name"' | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"//;s/".*//' \
-    | grep -E '^clamav-[0-9]+\.[0-9]+\.[0-9]+$' | head -1 \
-    | sed 's/^clamav-//'
+    | tar -xzO APKINDEX 2>/dev/null \
+    | awk '/^P:clamav$/{f=1; next} f && /^V:/{print; exit}' \
+    | sed 's/^V://;s/-r[0-9]*$//'
 }
 
 # Extract latest Squid stable (filter out RC/beta, handle SQUID_x_y_z tags)
@@ -80,8 +85,11 @@ squid_latest() {
 # --- Read current versions ---
 current_squid=$(grep '"squid"' "$VERSIONS_FILE" | sed 's/.*: *"//;s/".*//')
 current_cicap=$(grep '"c-icap"' "$VERSIONS_FILE" | sed 's/.*: *"//;s/".*//')
+current_cicap_sha256=$(grep '"c-icap_sha256"' "$VERSIONS_FILE" | sed 's/.*: *"//;s/".*//')
 current_squidclamav=$(grep '"squidclamav"' "$VERSIONS_FILE" | sed 's/.*: *"//;s/".*//')
+current_squidclamav_sha256=$(grep '"squidclamav_sha256"' "$VERSIONS_FILE" | sed 's/.*: *"//;s/".*//')
 current_clamav=$(grep '"clamav"' "$VERSIONS_FILE" | sed 's/.*: *"//;s/".*//')
+current_alpine=$(grep '"alpine"' "$VERSIONS_FILE" | sed 's/.*: *"//;s/".*//')
 
 # --- Fetch latest versions ---
 printf 'Checking upstream versions...\n'
@@ -89,7 +97,7 @@ printf 'Checking upstream versions...\n'
 latest_squid=$(squid_latest) || latest_squid="$current_squid"
 latest_cicap=$(github_latest_release "c-icap/c-icap-server" "CI_") || latest_cicap="$current_cicap"
 latest_squidclamav=$(github_latest_release "darold/squidclamav" "v") || latest_squidclamav="$current_squidclamav"
-latest_clamav=$(clamav_latest) || latest_clamav="$current_clamav"
+latest_clamav=$(clamav_latest "$current_alpine") || latest_clamav="$current_clamav"
 
 # --- Compare ---
 CHANGES=""
@@ -123,24 +131,60 @@ fi
 # --- Apply updates ---
 printf 'Applying updates...\n'
 
-# 1. versions.json (read alpine before overwrite)
-current_alpine=$(grep '"alpine"' "$VERSIONS_FILE" | sed 's/.*: *"//;s/".*//')
+# 1. Recompute sha256 pins for tarballs whose version changed (c-icap and
+#    squidclamav have no upstream GPG signature, unlike squid — pinning the
+#    hash here is the only integrity check the Dockerfile can perform).
+#    Download to a temp file first: `curl | sha256sum` would silently hash
+#    an empty stream (and report success) if curl failed, since the pipe's
+#    exit status is sha256sum's, not curl's.
+sha256_of_url() {
+  url="$1"
+  tmp=$(mktemp)
+  if ! curl -fsSL --retry 3 "$url" -o "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  sha256sum "$tmp" | cut -d' ' -f1
+  rm -f "$tmp"
+}
+
+latest_cicap_sha256="$current_cicap_sha256"
+if [ "$latest_cicap" != "$current_cicap" ]; then
+  printf '  computing sha256 for c-icap %s...\n' "$latest_cicap"
+  latest_cicap_sha256=$(sha256_of_url \
+    "https://sourceforge.net/projects/c-icap/files/c-icap/0.6.x/c_icap-${latest_cicap}.tar.gz/download") \
+    || die "failed to download c-icap ${latest_cicap} for checksum"
+fi
+
+latest_squidclamav_sha256="$current_squidclamav_sha256"
+if [ "$latest_squidclamav" != "$current_squidclamav" ]; then
+  printf '  computing sha256 for squidclamav %s...\n' "$latest_squidclamav"
+  latest_squidclamav_sha256=$(sha256_of_url \
+    "https://github.com/darold/squidclamav/archive/refs/tags/v${latest_squidclamav}.tar.gz") \
+    || die "failed to download squidclamav ${latest_squidclamav} for checksum"
+fi
+
+# 2. versions.json
 cat > "$VERSIONS_FILE" <<EOF
 {
   "squid": "${latest_squid}",
   "c-icap": "${latest_cicap}",
+  "c-icap_sha256": "${latest_cicap_sha256}",
   "squidclamav": "${latest_squidclamav}",
+  "squidclamav_sha256": "${latest_squidclamav_sha256}",
   "clamav": "${latest_clamav}",
   "alpine": "${current_alpine}"
 }
 EOF
 
-# 2. Dockerfiles ARG defaults
+# 3. Dockerfiles ARG defaults
 sed -i "s/^ARG SQUID_VERSION=.*/ARG SQUID_VERSION=${latest_squid}/" "${ROOT_DIR}/squid/Dockerfile"
 sed -i "s/^ARG CICAP_VERSION=.*/ARG CICAP_VERSION=${latest_cicap}/" "${ROOT_DIR}/c-icap/Dockerfile"
+sed -i "s/^ARG CICAP_SHA256=.*/ARG CICAP_SHA256=${latest_cicap_sha256}/" "${ROOT_DIR}/c-icap/Dockerfile"
 sed -i "s/^ARG SQUIDCLAMAV_VERSION=.*/ARG SQUIDCLAMAV_VERSION=${latest_squidclamav}/" "${ROOT_DIR}/c-icap/Dockerfile"
+sed -i "s/^ARG SQUIDCLAMAV_SHA256=.*/ARG SQUIDCLAMAV_SHA256=${latest_squidclamav_sha256}/" "${ROOT_DIR}/c-icap/Dockerfile"
 
-# 3. .env.example
+# 4. .env.example
 sed -i "s/^SQUID_VERSION=.*/SQUID_VERSION=${latest_squid}/" "${ROOT_DIR}/.env.example"
 sed -i "s/^CICAP_VERSION=.*/CICAP_VERSION=${latest_cicap}/" "${ROOT_DIR}/.env.example"
 sed -i "s/^SQUIDCLAMAV_VERSION=.*/SQUIDCLAMAV_VERSION=${latest_squidclamav}/" "${ROOT_DIR}/.env.example"

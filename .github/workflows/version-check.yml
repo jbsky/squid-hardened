@@ -14,13 +14,14 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   check:
     name: Check & bump upstream versions
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Check for updates
         id: check
@@ -68,3 +69,13 @@ jobs:
           git add versions.json .env.example squid/Dockerfile c-icap/Dockerfile
           git commit -m "${{ steps.msg.outputs.msg }}"
           git push
+
+      # A push made with the default GITHUB_TOKEN never fires other
+      # `on: push` workflows (GitHub's anti-recursion guard), so build-push.yml
+      # would otherwise never run after a version bump. An explicit dispatch
+      # via the API is not subject to that restriction.
+      - name: Trigger build-push
+        if: steps.check.outputs.updated == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run build-push.yml --ref main
