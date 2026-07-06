@@ -17,7 +17,7 @@ ARG SQUID_VERSION=7.6
 ARG ALPINE_VERSION=3.21
 
 # ---------- Stage 1 : builder ----------------------------------------
-FROM alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d AS builder
+FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS builder
 
 ARG SQUID_VERSION
 SHELL ["/bin/ash", "-eo", "pipefail", "-c"]
@@ -137,7 +137,7 @@ COPY go.mod init.go ./
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags='-s -w' -o /init .
 
 # ---------- Stage 3 : prep (assemble runtime filesystem) ------------
-FROM alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d AS prep
+FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS prep
 
 # -- Runtime APK installs split to stay within proxy 240s timeout --
 
