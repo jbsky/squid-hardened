@@ -14,7 +14,7 @@ ARG SQUIDCLAMAV_VERSION=7.5
 ARG SQUIDCLAMAV_SHA256=4d076b692e45cb78b384b5c4a1c63f755d565bdc01c732cc5ddbb8b4f046ceae
 
 # ---------- Stage 1 : builder ----------------------------------------
-FROM alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d AS builder
+FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS builder
 
 ARG CICAP_VERSION
 ARG CICAP_SHA256
@@ -99,7 +99,7 @@ COPY go.mod init.go ./
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags='-s -w' -o /init .
 
 # ---------- Stage 3 : prep (assemble runtime filesystem) ------------
-FROM alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d AS prep
+FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS prep
 
 # -- Runtime APK installs split to stay within proxy 240s timeout --
 
