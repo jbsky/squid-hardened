@@ -35,3 +35,15 @@ run, cross-check the surviving semver tags for each image with a direct `grype
 still flagged, delete it explicitly via `gh api --method DELETE
 /users/<owner>/packages/container/<image>/versions/<id>` (GHCR) or the Docker Hub REST
 API. Don't assume the automated retention alone guarantees no vulnerable tag survives.
+
+**Real incident, same day**: the first live run of these scripts wiped `squid-hardened`
+down to just `:latest` on both registries -- a two-component version scheme (`7.5`,
+`7.6`) didn't match the scripts' `X.Y.Z`-only semver regex, so it fell into the
+"always delete" bucket alongside `auto-*` snapshot tags. On GHCR, `latest` was deleted
+too, because GHCR groups tags sharing a digest into one "version" object and the
+script classifies by the first listed tag only -- `7.6` happened to be listed before
+`latest` on that object, so deleting it took both. Restored the same day via `docker
+buildx imagetools create` from the still-intact digest, and again via a full rebuild
+once the fix landed (the version tag never disappeared from `versions.json`, only
+from the registries). Full writeup and the sort-direction bug that also hit
+`php-fpm-hardened` are in `nginx-hardened`'s `SECURITY.md`. Fixed in `7759157`.
