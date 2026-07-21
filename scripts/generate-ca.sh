@@ -9,12 +9,14 @@
 # =====================================================================
 set -euo pipefail
 
+# certs/ is gitignored (private key material), so it doesn't exist on a
+# fresh checkout -- create it before resolving its absolute path with cd.
+mkdir -p "$(dirname "$0")/../certs"
 CERT_DIR="$(cd "$(dirname "$0")/../certs" && pwd)"
 CN="${SSL_BUMP_CA_CN:-Internal Squid Bump CA}"
 ORG="${SSL_BUMP_CA_ORG:-MonOrganisation}"
 DAYS="${SSL_BUMP_CA_DAYS:-3650}"
 
-mkdir -p "${CERT_DIR}"
 chmod 0700 "${CERT_DIR}"
 
 if [[ -f "${CERT_DIR}/bump.pem" ]]; then
