@@ -10,7 +10,16 @@
 set -euo pipefail
 
 PROXY="${1:-}"
-NETWORK="stack-squid_proxy_net"
+# The compose project name (and therefore the network name's prefix)
+# defaults to the checkout directory's basename, which varies: "stack-squid"
+# locally, "squid-hardened" on a fresh GitHub Actions checkout (matches the
+# repo name). The suffix is always "_proxy_net" regardless of project name,
+# so find it dynamically instead of hardcoding one directory name.
+NETWORK="$(docker network ls --format '{{.Name}}' | grep '_proxy_net$' | head -1)"
+if [[ -z "$NETWORK" ]]; then
+    echo "[test] ERREUR: aucun réseau *_proxy_net trouvé (stack pas démarrée ?)" >&2
+    exit 1
+fi
 # EICAR test string, base64-encoded to avoid shell/printf interpretation issues
 EICAR_B64="WDVPIVAlQEFQWzRcUFpYNTQoUF4pN0NDKTd9JEVJQ0FSLVNUQU5EQVJELUFOVElWSVJVUy1URVNULUZJTEUhJEgrSCo="
 
