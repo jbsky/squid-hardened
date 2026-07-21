@@ -34,7 +34,7 @@ jobs:
       matrix:
         image: [squid-hardened, c-icap-hardened, clamav-hardened]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Check Docker Hub credentials
         id: dockerhub
