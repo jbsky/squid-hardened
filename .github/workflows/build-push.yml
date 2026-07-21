@@ -194,11 +194,11 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       # Login dhi.io pour que BuildKit puisse pull le frontend DHI
       - name: Login dhi.io (frontend DHI)
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: dhi.io
           username: ${{ secrets.DOCKER_USERNAME }}
@@ -270,19 +270,19 @@ jobs:
           platforms: arm64
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
         with:
           driver-opts: image=moby/buildkit:latest
 
       - name: Login dhi.io (frontend DHI)
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: dhi.io
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
 
       - name: Login ghcr.io (registry cible)
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -347,17 +347,17 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Download digests
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: /tmp/digests/${{ matrix.image.name }}
           pattern: dhi-digest-${{ matrix.image.name }}-*
           merge-multiple: true
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Login ghcr.io
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -504,10 +504,10 @@ jobs:
           platforms: arm64
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Login ghcr.io
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -515,7 +515,7 @@ jobs:
 
       - name: Login Docker Hub
         if: env.HAS_DOCKERHUB == 'true'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         env:
           HAS_DOCKERHUB: ${{ secrets.DOCKERHUB_TOKEN != '' }}
         with:
@@ -525,7 +525,7 @@ jobs:
       # Scan the Alpine prep stage (amd64 only – can't --load cross-arch)
       - name: Build prep stage (Alpine with runtime deps)
         if: matrix.platform == 'linux/amd64'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.image.context }}
           file: ${{ matrix.image.dockerfile }}
@@ -555,7 +555,7 @@ jobs:
 
       - name: Build & Push by digest
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.image.context }}
           file: ${{ matrix.image.dockerfile }}
@@ -610,17 +610,17 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Download digests
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: /tmp/digests/${{ matrix.image.name }}
           pattern: digest-${{ matrix.image.name }}-*
           merge-multiple: true
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Login ghcr.io
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -628,7 +628,7 @@ jobs:
 
       - name: Login Docker Hub
         if: env.HAS_DOCKERHUB == 'true'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         env:
           HAS_DOCKERHUB: ${{ secrets.DOCKERHUB_TOKEN != '' }}
         with:

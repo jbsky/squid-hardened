@@ -47,6 +47,7 @@ RUN apk add --no-cache \
         nettle-dev gnutls-dev
 
 # 3/3  XML, network, test, LDAP libs + download tools
+# hadolint ignore=DL3059
 RUN apk add --no-cache \
         libxml2-dev \
         libnetfilter_conntrack-dev \

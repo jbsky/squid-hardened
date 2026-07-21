@@ -31,20 +31,18 @@ ENV CFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIE -D_FORTI
 RUN --mount=type=secret,id=ca-certs,required=false \
     [ -f /run/secrets/ca-certs ] && cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt || true \
  && sed -i 's|https://|http://|g' /etc/apk/repositories \
- && apk add \
+ && apk add --no-cache \
         build-base autoconf automake libtool pkgconf \
         curl xz \
-        ca-certificates \
- && rm -rf /var/cache/apk/*
+        ca-certificates
 
 # 2/2  Development libraries
-RUN apk add \
+RUN apk add --no-cache \
         clamav-dev \
         curl-dev \
         zlib-dev bzip2-dev \
         pcre-dev pcre2-dev \
-        openssl-dev \
- && rm -rf /var/cache/apk/*
+        openssl-dev
 
 WORKDIR /src
 
@@ -86,11 +84,10 @@ RUN make -C /src/c-icap install \
  && make -j"$(nproc)" \
  && make install DESTDIR=/out
 
-# Strip
-RUN find /out -type f \( -name '*.so*' -o -perm -111 \) -exec sh -c 'file "$1" 2>/dev/null | grep -q "ELF" && strip "$1" 2>/dev/null || true' _ {} \;
-
-# Remove /out/var/run created by make install — conflicts with /var/run -> /run symlink
-RUN rm -rf /out/var/run
+# Strip, then remove /out/var/run created by make install — conflicts with
+# /var/run -> /run symlink
+RUN find /out -type f \( -name '*.so*' -o -perm -111 \) -exec sh -c 'file "$1" 2>/dev/null | grep -q "ELF" && strip "$1" 2>/dev/null || true' _ {} \; \
+ && rm -rf /out/var/run
 
 # ---------- Stage 2 : Go builder (entrypoint + healthcheck) ---------
 FROM golang:1.26-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2 AS gobuilder
