@@ -60,7 +60,7 @@ Healthchecks via le binaire Go `/usr/local/bin/init --healthcheck` — protocole
 
 | Image | Healthcheck |
 |-------|------------|
-| squid | HTTP GET `cache_object://localhost/info` sur :3128 → attend `200` |
+| squid | HTTP GET `/squid-internal-mgr/info` sur :3128 → attend `200` |
 | c-icap | ICAP `OPTIONS icap://localhost/squidclamav` sur :1344 → attend `200` |
 | clamav | TCP `PING\n` sur :3310 → attend `PONG` |
 

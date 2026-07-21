@@ -91,6 +91,54 @@ jobs:
           scandir: ./scripts
 
   # -------------------------------------------------------------------
+  #  Functional test: build the 3 images locally (plain Dockerfile, not
+  #  DHI) and exercise the real squid -> c-icap -> clamav ICAP chain with
+  #  an EICAR download, gating both publish paths below.
+  # -------------------------------------------------------------------
+  test:
+    name: Functional tests (EICAR)
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Generate SSL-bump CA (required by squid-explicit.conf)
+        run: ./scripts/generate-ca.sh
+
+      - name: Build & start stack
+        run: docker compose --profile explicit up -d --build
+
+      - name: Wait for clamav + c-icap + squid-explicit healthy
+        run: |
+          set -euo pipefail
+          # clamav's first boot blocks on a real freshclam sync against
+          # database.clamav.net before clamd even starts -- typically well
+          # under a minute, but generous here since it's third-party network.
+          for _ in $(seq 1 60); do
+            all_healthy=true
+            for c in clamav c-icap squid-explicit; do
+              status=$(docker inspect --format '{{.State.Health.Status}}' "$c" 2>/dev/null || echo "starting")
+              [ "$status" = "healthy" ] || all_healthy=false
+            done
+            [ "$all_healthy" = "true" ] && exit 0
+            sleep 10
+          done
+          echo "::error::stack did not become healthy in time"
+          docker compose logs
+          exit 1
+
+      - name: EICAR test (squid -> c-icap -> clamav)
+        run: ./scripts/test-eicar.sh
+
+      - name: Container logs (on failure)
+        if: failure()
+        run: docker compose logs
+
+      - name: Teardown
+        if: always()
+        run: docker compose --profile explicit down -v
+
+  # -------------------------------------------------------------------
   #  Check if DHI credentials are configured
   # -------------------------------------------------------------------
   check-dhi:
@@ -184,7 +232,7 @@ jobs:
   # -------------------------------------------------------------------
   build-dhi:
     name: DHI – ${{ matrix.image.name }} (${{ matrix.platform }})
-    needs: [check-dhi, validate-dhi, compute-platforms]
+    needs: [check-dhi, validate-dhi, compute-platforms, test]
     runs-on: ubuntu-latest
     if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && needs.check-dhi.outputs.has-dhi == 'true'
     strategy:
@@ -414,7 +462,7 @@ jobs:
   # -------------------------------------------------------------------
   build-dockerfile:
     name: Build – ${{ matrix.image.name }} (${{ matrix.platform }})
-    needs: [check-dhi, compute-platforms]
+    needs: [check-dhi, compute-platforms, test]
     runs-on: ubuntu-latest
     # Runs on main push or tags when DHI secrets are NOT available (fallback)
     if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && needs.check-dhi.outputs.has-dhi == 'false'

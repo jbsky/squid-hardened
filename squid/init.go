@@ -187,7 +187,14 @@ func setupDirs() error {
 }
 
 // ---------------------------------------------------------------------------
-// Healthcheck: GET cache_object://localhost/info → expect "200"
+// Healthcheck: GET /squid-internal-mgr/info → expect "200"
+//
+// The legacy "cache_object://" URL scheme this used to query was removed
+// from Squid's URL parser well before 7.x -- it now answers any such request
+// with a flat 400 ERR_INVALID_URL regardless of ACLs or source address, so
+// this healthcheck failed unconditionally. /squid-internal-mgr/ is the
+// scheme squid actually understands today (same cache manager info page,
+// reached as a normal HTTP path, gated by the same "manager" ACL).
 // ---------------------------------------------------------------------------
 
 func healthcheck() int {
@@ -197,7 +204,7 @@ func healthcheck() int {
 	}
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
-	fmt.Fprint(conn, "GET cache_object://localhost/info HTTP/1.0\r\n\r\n")
+	fmt.Fprint(conn, "GET /squid-internal-mgr/info HTTP/1.0\r\nHost: localhost\r\n\r\n")
 	sc := bufio.NewScanner(conn)
 	if sc.Scan() && strings.Contains(sc.Text(), "200") {
 		return 0
