@@ -264,7 +264,7 @@ jobs:
           PLATFORM: ${{ matrix.platform }}
 
       - name: Upload digest
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dhi-digest-${{ matrix.image.name }}-${{ steps.slug.outputs.slug }}
           path: /tmp/digests/${{ matrix.image.name }}
@@ -527,7 +527,7 @@ jobs:
           PLATFORM: ${{ matrix.platform }}
 
       - name: Upload digest
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: digest-${{ matrix.image.name }}-${{ steps.slug.outputs.slug }}
           path: /tmp/digests/${{ matrix.image.name }}
