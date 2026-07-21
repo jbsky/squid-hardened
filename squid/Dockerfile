@@ -70,6 +70,7 @@ RUN --mount=type=secret,id=ca-certs,required=false \
  && GNUPGHOME="$(mktemp -d)" && export GNUPGHOME \
  && gpg --batch --import /tmp/squid-cache.pgp.asc \
  && gpg --batch --verify squid.tar.xz.asc squid.tar.xz \
+ && gpgconf --kill gpg-agent \
  && rm -rf "$GNUPGHOME" squid.tar.xz.asc /tmp/squid-cache.pgp.asc \
  && tar -xJf squid.tar.xz \
  && mv "squid-${SQUID_VERSION}" squid
