@@ -68,7 +68,7 @@ if [[ -z "$PROXY" ]]; then
     echo "[test] Reponse:"
     echo "$result" | head -15
 
-    if echo "$result" | grep -qi "Eicar-Test-Signature FOUND\|virus.*FOUND"; then
+    if echo "$result" | grep -qi "Eicar-Test-Signature FOUND\|virus.*FOUND\|X-Virus-ID:\|X-Infection-Found:"; then
         echo ""
         echo "[test] PASS - Antivirus a bloque EICAR (chaine ICAP fonctionnelle)"
         exit 0
@@ -97,7 +97,7 @@ echo "[test] Code HTTP : ${http_code}"
 echo "[test] Apercu reponse :"
 head -c 200 /tmp/eicar.out 2>/dev/null; echo
 
-if grep -q -E "(virus|VIRUS|infected|CLAMAV|Eicar.*FOUND)" /tmp/eicar.out 2>/dev/null; then
+if grep -q -i -E "(virus|infected|clamav|eicar.*found|x-infection-found)" /tmp/eicar.out 2>/dev/null; then
     echo "[test] PASS - Antivirus a bloque EICAR (chaine ICAP fonctionnelle)"
     exit 0
 fi
