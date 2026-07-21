@@ -123,10 +123,17 @@ jobs:
               [ "$status" = "healthy" ] || all_healthy=false
             done
             echo "[$((i*10))s]$line"
+            if [ $((i % 3)) -eq 0 ]; then
+              docker stats --no-stream --format '  stats: {{.Name}} mem={{.MemUsage}} cpu={{.CPUPerc}}'
+            fi
             [ "$all_healthy" = "true" ] && exit 0
             sleep 10
           done
           echo "::error::stack did not become healthy in time"
+          for c in clamav c-icap squid-explicit; do
+            echo "-- $c: OOMKilled=$(docker inspect --format '{{.State.OOMKilled}}' "$c" 2>&1), ExitCode=$(docker inspect --format '{{.State.ExitCode}}' "$c" 2>&1), RestartCount=$(docker inspect --format '{{.RestartCount}}' "$c" 2>&1)"
+          done
+          free -h
           docker compose ps -a
           docker compose logs
           exit 1
