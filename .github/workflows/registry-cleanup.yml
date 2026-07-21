@@ -1,0 +1,57 @@
+# =====================================================================
+#  Registry Cleanup — Prune old immutable version tags
+#
+#  build-push.yml pushes a brand new immutable version tag per image
+#  (e.g. squid-hardened:7.5) on every run, on both Docker Hub and GHCR,
+#  without ever retiring the previous one. Old tags accumulate forever
+#  and eventually point at genuinely vulnerable builds still publicly
+#  pullable (found on nginx-hardened: 1.30.1/1.30.2 still live months
+#  after the CVE fix landed; same pattern confirmed here on squid-hardened
+#  7.5, c-icap-hardened 0.6.4, clamav-hardened 1.4.2, all still flagged
+#  by grype for real fixed CVEs). This workflow prunes them, keeping only
+#  the last few semver tags plus :latest, for all three images.
+#
+#  Callable from build-push.yml after a push, and directly
+#  workflow_dispatch-able to clean up backlog on demand.
+# =====================================================================
+name: registry-cleanup
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+env:
+  KEEP_COUNT: 3
+
+permissions:
+  packages: write
+
+jobs:
+  prune:
+    name: Prune old tags — ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image: [squid-hardened, c-icap-hardened, clamav-hardened]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check Docker Hub credentials
+        id: dockerhub
+        run: |
+          if [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Prune old Docker Hub tags
+        if: steps.dockerhub.outputs.available == 'true'
+        env:
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: ./scripts/prune-registry-tags.sh "${{ secrets.DOCKERHUB_USERNAME }}" "${{ matrix.image }}" "${{ env.KEEP_COUNT }}"
+
+      - name: Prune old GHCR tags
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/prune-ghcr-tags.sh "${{ github.repository_owner }}" "${{ matrix.image }}" "${{ env.KEEP_COUNT }}"

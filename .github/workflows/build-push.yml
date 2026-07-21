@@ -697,6 +697,13 @@ jobs:
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
 
   # -------------------------------------------------------------------
+  cleanup:
+    name: Prune old registry tags
+    needs: merge-dockerfile
+    uses: ./.github/workflows/registry-cleanup.yml
+    secrets: inherit
+
+  # -------------------------------------------------------------------
   #  Release sur tag v*.*.* : tarball + checksums
   # -------------------------------------------------------------------
   release:
