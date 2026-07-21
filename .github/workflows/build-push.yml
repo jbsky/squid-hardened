@@ -114,16 +114,20 @@ jobs:
           # clamav's first boot blocks on a real freshclam sync against
           # database.clamav.net before clamd even starts -- typically well
           # under a minute, but generous here since it's third-party network.
-          for _ in $(seq 1 60); do
+          for i in $(seq 1 60); do
             all_healthy=true
+            line=""
             for c in clamav c-icap squid-explicit; do
-              status=$(docker inspect --format '{{.State.Health.Status}}' "$c" 2>/dev/null || echo "starting")
+              status=$(docker inspect --format '{{.State.Health.Status}}' "$c" 2>&1) || status="inspect-failed: $status"
+              line="$line $c=$status"
               [ "$status" = "healthy" ] || all_healthy=false
             done
+            echo "[$((i*10))s]$line"
             [ "$all_healthy" = "true" ] && exit 0
             sleep 10
           done
           echo "::error::stack did not become healthy in time"
+          docker compose ps -a
           docker compose logs
           exit 1
 
