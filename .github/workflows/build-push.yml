@@ -99,6 +99,13 @@ jobs:
     name: Functional tests (EICAR)
     needs: lint
     runs-on: ubuntu-latest
+    env:
+      # true on a real push/tag to this repo (never on pull_request -- fork
+      # PRs must never get registry push credentials); gates every
+      # push-by-digest / login / digest-export step below. On a PR, images
+      # are still built and functionally tested via `load: true`, just
+      # never pushed anywhere.
+      PUBLISH: ${{ github.event_name != 'pull_request' && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -108,6 +115,101 @@ jobs:
       - name: Generate SSL-bump CA (required by squid-explicit.conf)
         run: ./scripts/generate-ca.sh
 
+      - name: Login ghcr.io
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Scan each image's Alpine runtime-deps stage (moved here from
+      # build-dockerfile since amd64 -- the only platform these can --load
+      # -- is now always built in this job, never there; runs on every PR
+      # too, not just push). clamav has no separate "prep" stage -- its
+      # builder stage doubles as the runtime-deps assembly, matching
+      # build-dockerfile's original per-image prep-target mapping.
+      - name: Build prep stage (Alpine with runtime deps) - clamav-hardened
+        uses: docker/build-push-action@v7
+        with:
+          context: clamav/
+          file: clamav/Dockerfile
+          target: builder
+          platforms: linux/amd64
+          load: true
+          tags: clamav-hardened-prep:scan
+          cache-from: type=gha,scope=clamav-hardened-prep
+
+      - name: Trivy scan prep stage (Alpine CVEs) - clamav-hardened
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: clamav-hardened-prep:scan
+          format: sarif
+          output: trivy-clamav-hardened-deps.sarif
+          severity: CRITICAL,HIGH
+          exit-code: '0'
+          ignore-unfixed: true
+
+      - name: Upload prep SARIF - clamav-hardened
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-clamav-hardened-deps.sarif
+          category: clamav-hardened-deps
+
+      - name: Build prep stage (Alpine with runtime deps) - c-icap-hardened
+        uses: docker/build-push-action@v7
+        with:
+          context: c-icap/
+          file: c-icap/Dockerfile
+          target: prep
+          platforms: linux/amd64
+          load: true
+          tags: c-icap-hardened-prep:scan
+          cache-from: type=gha,scope=c-icap-hardened-prep
+
+      - name: Trivy scan prep stage (Alpine CVEs) - c-icap-hardened
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: c-icap-hardened-prep:scan
+          format: sarif
+          output: trivy-c-icap-hardened-deps.sarif
+          severity: CRITICAL,HIGH
+          exit-code: '0'
+          ignore-unfixed: true
+
+      - name: Upload prep SARIF - c-icap-hardened
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-c-icap-hardened-deps.sarif
+          category: c-icap-hardened-deps
+
+      - name: Build prep stage (Alpine with runtime deps) - squid-hardened
+        uses: docker/build-push-action@v7
+        with:
+          context: squid/
+          file: squid/Dockerfile
+          target: prep
+          platforms: linux/amd64
+          load: true
+          tags: squid-hardened-prep:scan
+          cache-from: type=gha,scope=squid-hardened-prep
+
+      - name: Trivy scan prep stage (Alpine CVEs) - squid-hardened
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: squid-hardened-prep:scan
+          format: sarif
+          output: trivy-squid-hardened-deps.sarif
+          severity: CRITICAL,HIGH
+          exit-code: '0'
+          ignore-unfixed: true
+
+      - name: Upload prep SARIF - squid-hardened
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-squid-hardened-deps.sarif
+          category: squid-hardened-deps
+
       # squid and c-icap compile from source (~9-10 min for squid alone).
       # Two prior attempts at sharing build-dockerfile's `type=gha` cache
       # through `docker compose build`/`buildx bake` (docker-compose.ci.yml
@@ -115,43 +217,87 @@ jobs:
       # never actually got a hit from build-dockerfile's cache -- no
       # measurable speedup either time, most likely a cache-key mismatch
       # between compose/bake's build invocation and build-push-action's.
-      # Using the exact same action build-dockerfile uses below, with the
-      # exact same cache scope, sidesteps that entirely: same tool, same
-      # key derivation, guaranteed-compatible cache.
-      - name: Build clamav-hardened (load, shared gha cache)
+      # Using the exact same action build-dockerfile uses, with the exact
+      # same cache scope, sidesteps that entirely: same tool, same key
+      # derivation, guaranteed-compatible cache.
+      #
+      # On a real push/tag (PUBLISH=true), each image is pushed by digest
+      # (not loaded) and then pulled back BY THAT EXACT DIGEST for the
+      # functional test below -- not "an image that should be identical
+      # thanks to cache", the literal bytes now sitting in the registry. If
+      # that digest passes, build-dockerfile/merge-dockerfile reuse it
+      # as-is for the published manifest; nothing gets rebuilt between "we
+      # tested this" and "this is what ships". On a PR there's nothing to
+      # promote yet, so `load: true` is enough to validate the code.
+      - name: Build clamav-hardened
+        id: build-clamav
         uses: docker/build-push-action@v7
         with:
           context: clamav/
           file: clamav/Dockerfile
           platforms: linux/amd64
-          load: true
+          load: ${{ env.PUBLISH != 'true' }}
+          outputs: ${{ env.PUBLISH == 'true' && format('type=image,name={0}/{1}/clamav-hardened,push-by-digest=true,name-canonical=true,push=true', env.REGISTRY, env.NAMESPACE) || '' }}
+          sbom: ${{ env.PUBLISH }}
+          provenance: ${{ env.PUBLISH == 'true' && 'mode=max' || 'false' }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
           tags: docker.io/jbsky/clamav-hardened:latest
           cache-from: type=gha,scope=clamav-hardened-linux/amd64
           cache-to: type=gha,mode=max,scope=clamav-hardened-linux/amd64
 
-      - name: Build c-icap-hardened (load, shared gha cache)
+      - name: Build c-icap-hardened
+        id: build-cicap
         uses: docker/build-push-action@v7
         with:
           context: c-icap/
           file: c-icap/Dockerfile
           platforms: linux/amd64
-          load: true
+          load: ${{ env.PUBLISH != 'true' }}
+          outputs: ${{ env.PUBLISH == 'true' && format('type=image,name={0}/{1}/c-icap-hardened,push-by-digest=true,name-canonical=true,push=true', env.REGISTRY, env.NAMESPACE) || '' }}
+          sbom: ${{ env.PUBLISH }}
+          provenance: ${{ env.PUBLISH == 'true' && 'mode=max' || 'false' }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
           tags: docker.io/jbsky/c-icap-hardened:latest
           cache-from: type=gha,scope=c-icap-hardened-linux/amd64
           cache-to: type=gha,mode=max,scope=c-icap-hardened-linux/amd64
 
-      - name: Build squid-hardened (load, shared gha cache)
+      - name: Build squid-hardened
+        id: build-squid
         uses: docker/build-push-action@v7
         with:
           context: squid/
           file: squid/Dockerfile
           platforms: linux/amd64
-          load: true
+          load: ${{ env.PUBLISH != 'true' }}
+          outputs: ${{ env.PUBLISH == 'true' && format('type=image,name={0}/{1}/squid-hardened,push-by-digest=true,name-canonical=true,push=true', env.REGISTRY, env.NAMESPACE) || '' }}
+          sbom: ${{ env.PUBLISH }}
+          provenance: ${{ env.PUBLISH == 'true' && 'mode=max' || 'false' }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
           tags: docker.io/jbsky/squid-hardened:latest
           cache-from: type=gha,scope=squid-hardened-linux/amd64
           cache-to: type=gha,mode=max,scope=squid-hardened-linux/amd64
 
-      - name: Start stack (images already built above)
+      # Pull back the exact digest just pushed, under the tag docker-compose
+      # expects -- guarantees what gets tested below is byte-for-byte what's
+      # now in the registry, not a separately-loaded local build.
+      - name: Pull back pushed digests for testing
+        if: env.PUBLISH == 'true'
+        run: |
+          set -euo pipefail
+          docker pull "${{ env.REGISTRY }}/${{ env.NAMESPACE }}/clamav-hardened@${{ steps.build-clamav.outputs.digest }}"
+          docker tag  "${{ env.REGISTRY }}/${{ env.NAMESPACE }}/clamav-hardened@${{ steps.build-clamav.outputs.digest }}" docker.io/jbsky/clamav-hardened:latest
+          docker pull "${{ env.REGISTRY }}/${{ env.NAMESPACE }}/c-icap-hardened@${{ steps.build-cicap.outputs.digest }}"
+          docker tag  "${{ env.REGISTRY }}/${{ env.NAMESPACE }}/c-icap-hardened@${{ steps.build-cicap.outputs.digest }}" docker.io/jbsky/c-icap-hardened:latest
+          docker pull "${{ env.REGISTRY }}/${{ env.NAMESPACE }}/squid-hardened@${{ steps.build-squid.outputs.digest }}"
+          docker tag  "${{ env.REGISTRY }}/${{ env.NAMESPACE }}/squid-hardened@${{ steps.build-squid.outputs.digest }}" docker.io/jbsky/squid-hardened:latest
+
+      - name: Start stack (images already built/pulled above)
         run: docker compose --profile explicit up -d --no-build
 
       - name: Wait for clamav + c-icap + squid-explicit healthy
@@ -191,6 +337,54 @@ jobs:
         if: always()
         run: docker compose --profile explicit down -v
 
+      # Only reached if the EICAR test above passed. Exports the exact
+      # digests just tested so build-dockerfile/merge-dockerfile can reuse
+      # them directly for amd64 instead of building again -- same naming
+      # convention (digest-<image>-<platform-slug>) build-dockerfile's own
+      # "Export digest"/"Upload digest" steps use, so merge-dockerfile's
+      # existing `pattern: digest-<image>-*` download picks these up too.
+      - name: Export tested digests (amd64)
+        id: export-digests
+        if: env.PUBLISH == 'true'
+        run: |
+          set -euo pipefail
+          declare -A digests=(
+            [clamav-hardened]="${{ steps.build-clamav.outputs.digest }}"
+            [c-icap-hardened]="${{ steps.build-cicap.outputs.digest }}"
+            [squid-hardened]="${{ steps.build-squid.outputs.digest }}"
+          )
+          for name in "${!digests[@]}"; do
+            mkdir -p "/tmp/digests/${name}"
+            touch "/tmp/digests/${name}/${digests[$name]#sha256:}"
+          done
+
+      - name: Upload tested digests (clamav-hardened, linux/amd64)
+        if: env.PUBLISH == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: digest-clamav-hardened-linux-amd64
+          path: /tmp/digests/clamav-hardened
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload tested digests (c-icap-hardened, linux/amd64)
+        if: env.PUBLISH == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: digest-c-icap-hardened-linux-amd64
+          path: /tmp/digests/c-icap-hardened
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload tested digests (squid-hardened, linux/amd64)
+        if: env.PUBLISH == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: digest-squid-hardened-linux-amd64
+          path: /tmp/digests/squid-hardened
+          if-no-files-found: error
+          retention-days: 1
+
   # -------------------------------------------------------------------
   #  Check if DHI credentials are configured
   # -------------------------------------------------------------------
@@ -219,6 +413,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
+      matrix-secondary: ${{ steps.set.outputs.matrix-secondary }}
     steps:
       - id: set
         run: |
@@ -226,6 +421,15 @@ jobs:
           # Convert comma-separated string to JSON array
           MATRIX=$(echo "$PLATFORMS" | jq -Rc 'split(",")')
           echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
+          # amd64 is always built, pushed by digest, and functionally tested
+          # directly in the `test` job now (guarantees the exact tested
+          # digest is what ships, not a separately-rebuilt one) --
+          # build-dockerfile only needs to build whatever ELSE was
+          # requested (e.g. arm64 on a manual multi-platform dispatch). On
+          # a plain push (amd64 only) this resolves to an empty array,
+          # which skips build-dockerfile's matrix entirely.
+          SECONDARY=$(echo "$MATRIX" | jq -c '[.[] | select(. != "linux/amd64")]')
+          echo "matrix-secondary=${SECONDARY}" >> "$GITHUB_OUTPUT"
 
   # -------------------------------------------------------------------
   #  Validation YAML DHI (parse-check avant le vrai build)
@@ -526,25 +730,25 @@ jobs:
           - name: clamav-hardened
             dockerfile: clamav/Dockerfile
             context: clamav/
-            prep-target: builder
             version_key: clamav
           - name: squid-hardened
             dockerfile: squid/Dockerfile
             context: squid/
-            prep-target: prep
             version_key: squid
           - name: c-icap-hardened
             dockerfile: c-icap/Dockerfile
             context: c-icap/
-            prep-target: prep
             version_key: c-icap
-        platform: ${{ fromJson(needs.compute-platforms.outputs.matrix) }}
+        platform: ${{ fromJson(needs.compute-platforms.outputs.matrix-secondary) }}
 
     steps:
       - uses: actions/checkout@v7
 
+      # matrix-secondary never includes linux/amd64 (that platform is built,
+      # pushed by digest, and functionally tested directly in the `test`
+      # job) -- QEMU is unconditional here since this job now only ever
+      # builds other platforms (arm64 on a manual multi-platform dispatch).
       - name: Set up QEMU
-        if: matrix.platform != 'linux/amd64'
         uses: docker/setup-qemu-action@v4
         with:
           platforms: arm64
@@ -567,37 +771,6 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      # Scan the Alpine prep stage (amd64 only – can't --load cross-arch)
-      - name: Build prep stage (Alpine with runtime deps)
-        if: matrix.platform == 'linux/amd64'
-        uses: docker/build-push-action@v7
-        with:
-          context: ${{ matrix.image.context }}
-          file: ${{ matrix.image.dockerfile }}
-          target: ${{ matrix.image.prep-target }}
-          platforms: linux/amd64
-          load: true
-          tags: ${{ matrix.image.name }}-prep:scan
-          cache-from: type=gha,scope=${{ matrix.image.name }}-prep
-
-      - name: Trivy scan prep stage (Alpine CVEs)
-        if: matrix.platform == 'linux/amd64'
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          image-ref: ${{ matrix.image.name }}-prep:scan
-          format: sarif
-          output: trivy-${{ matrix.image.name }}-deps.sarif
-          severity: CRITICAL,HIGH
-          exit-code: '0'
-          ignore-unfixed: true
-
-      - name: Upload prep SARIF
-        if: matrix.platform == 'linux/amd64'
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: trivy-${{ matrix.image.name }}-deps.sarif
-          category: ${{ matrix.image.name }}-deps
 
       - name: Build & Push by digest
         id: build
@@ -640,8 +813,21 @@ jobs:
   # -------------------------------------------------------------------
   merge-dockerfile:
     name: Merge – ${{ matrix.image.name }}
-    needs: [build-dockerfile, check-dhi]
-    if: needs.build-dockerfile.result == 'success'
+    needs: [test, build-dockerfile, check-dhi]
+    # build-dockerfile is "skipped" (not "success") for two different
+    # reasons now: has-dhi==true (DHI path active instead -- must NOT merge
+    # here, explicitly excluded below) or has-dhi==false with nothing left
+    # in matrix-secondary (the common case: only amd64 was requested, and
+    # that digest already came from `test` itself -- must still merge).
+    # The explicit ref check is required now too: `test` runs (and passes)
+    # on every PR as well, and on a PR build-dockerfile is ALSO "skipped"
+    # (its own ref check fails) -- previously that "skipped" alone was
+    # enough to keep this job off PRs, since only 'success' was accepted.
+    # Accepting 'skipped' for the common amd64-only case reopened that gap.
+    if: >-
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) &&
+      needs.check-dhi.outputs.has-dhi == 'false' && needs.test.result == 'success' &&
+      (needs.build-dockerfile.result == 'success' || needs.build-dockerfile.result == 'skipped')
     runs-on: ubuntu-latest
     strategy:
       matrix:
