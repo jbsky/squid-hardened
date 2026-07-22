@@ -413,7 +413,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
-      matrix-secondary: ${{ steps.set.outputs.matrix-secondary }}
     steps:
       - id: set
         run: |
@@ -421,15 +420,6 @@ jobs:
           # Convert comma-separated string to JSON array
           MATRIX=$(echo "$PLATFORMS" | jq -Rc 'split(",")')
           echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
-          # amd64 is always built, pushed by digest, and functionally tested
-          # directly in the `test` job now (guarantees the exact tested
-          # digest is what ships, not a separately-rebuilt one) --
-          # build-dockerfile only needs to build whatever ELSE was
-          # requested (e.g. arm64 on a manual multi-platform dispatch). On
-          # a plain push (amd64 only) this resolves to an empty array,
-          # which skips build-dockerfile's matrix entirely.
-          SECONDARY=$(echo "$MATRIX" | jq -c '[.[] | select(. != "linux/amd64")]')
-          echo "matrix-secondary=${SECONDARY}" >> "$GITHUB_OUTPUT"
 
   # -------------------------------------------------------------------
   #  Validation YAML DHI (parse-check avant le vrai build)
@@ -739,24 +729,35 @@ jobs:
             dockerfile: c-icap/Dockerfile
             context: c-icap/
             version_key: c-icap
-        platform: ${{ fromJson(needs.compute-platforms.outputs.matrix-secondary) }}
+        platform: ${{ fromJson(needs.compute-platforms.outputs.matrix) }}
 
     steps:
       - uses: actions/checkout@v7
 
-      # matrix-secondary never includes linux/amd64 (that platform is built,
-      # pushed by digest, and functionally tested directly in the `test`
-      # job) -- QEMU is unconditional here since this job now only ever
-      # builds other platforms (arm64 on a manual multi-platform dispatch).
+      # linux/amd64 is built, pushed by digest, and functionally tested
+      # directly in the `test` job now (guarantees the exact tested digest
+      # is what ships, not a separately-rebuilt one) -- every step below
+      # that would build/push/export it again is skipped for that platform,
+      # this job only does real work for OTHER requested platforms (e.g.
+      # arm64 on a manual multi-platform dispatch). Kept as a real matrix
+      # entry rather than excluded outright: a job whose matrix resolves to
+      # zero entries doesn't produce a reliable success/skipped result for
+      # merge-dockerfile to depend on (confirmed empirically -- it doesn't
+      # even show up in the run's job list), and would ALSO try to upload
+      # an amd64 digest artifact under the exact same name test already
+      # uploads, colliding with it.
       - name: Set up QEMU
+        if: matrix.platform != 'linux/amd64'
         uses: docker/setup-qemu-action@v4
         with:
           platforms: arm64
 
       - name: Set up Docker Buildx
+        if: matrix.platform != 'linux/amd64'
         uses: docker/setup-buildx-action@v4
 
       - name: Login ghcr.io
+        if: matrix.platform != 'linux/amd64'
         uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
@@ -764,7 +765,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Login Docker Hub
-        if: env.HAS_DOCKERHUB == 'true'
+        if: matrix.platform != 'linux/amd64' && env.HAS_DOCKERHUB == 'true'
         uses: docker/login-action@v4
         env:
           HAS_DOCKERHUB: ${{ secrets.DOCKERHUB_TOKEN != '' }}
@@ -773,6 +774,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build & Push by digest
+        if: matrix.platform != 'linux/amd64'
         id: build
         uses: docker/build-push-action@v7
         with:
@@ -789,18 +791,21 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}-${{ matrix.platform }}
 
       - name: Export digest
+        if: matrix.platform != 'linux/amd64'
         run: |
           mkdir -p /tmp/digests/${{ matrix.image.name }}
           DIGEST="${{ steps.build.outputs.digest }}"
           touch "/tmp/digests/${{ matrix.image.name }}/${DIGEST#sha256:}"
 
       - name: Compute platform slug
+        if: matrix.platform != 'linux/amd64'
         id: slug
         run: echo "slug=${PLATFORM//\//-}" >> "$GITHUB_OUTPUT"
         env:
           PLATFORM: ${{ matrix.platform }}
 
       - name: Upload digest
+        if: matrix.platform != 'linux/amd64'
         uses: actions/upload-artifact@v7
         with:
           name: digest-${{ matrix.image.name }}-${{ steps.slug.outputs.slug }}
@@ -813,21 +818,8 @@ jobs:
   # -------------------------------------------------------------------
   merge-dockerfile:
     name: Merge – ${{ matrix.image.name }}
-    needs: [test, build-dockerfile, check-dhi]
-    # build-dockerfile's result is NOT a reliable 'success'/'skipped' signal
-    # to gate on anymore: with an empty matrix (matrix-secondary=[], the
-    # common case -- only amd64 was requested, and that digest already came
-    # from `test` itself) the job generates zero run instances and doesn't
-    # even show up in the run's job list, let alone report a clean
-    # 'skipped'. So: only explicitly BLOCK on build-dockerfile actually
-    # failing/being cancelled (real secondary-platform build gone wrong);
-    # accept anything else. has-dhi/ref/test are checked explicitly instead
-    # of relying on build-dockerfile's own gating to imply them (it's
-    # "skipped" on a PR too, for an unrelated reason -- its own ref check).
-    if: >-
-      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) &&
-      needs.check-dhi.outputs.has-dhi == 'false' && needs.test.result == 'success' &&
-      needs.build-dockerfile.result != 'failure' && needs.build-dockerfile.result != 'cancelled'
+    needs: [build-dockerfile, check-dhi]
+    if: needs.build-dockerfile.result == 'success'
     runs-on: ubuntu-latest
     strategy:
       matrix:
