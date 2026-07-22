@@ -814,20 +814,20 @@ jobs:
   merge-dockerfile:
     name: Merge – ${{ matrix.image.name }}
     needs: [test, build-dockerfile, check-dhi]
-    # build-dockerfile is "skipped" (not "success") for two different
-    # reasons now: has-dhi==true (DHI path active instead -- must NOT merge
-    # here, explicitly excluded below) or has-dhi==false with nothing left
-    # in matrix-secondary (the common case: only amd64 was requested, and
-    # that digest already came from `test` itself -- must still merge).
-    # The explicit ref check is required now too: `test` runs (and passes)
-    # on every PR as well, and on a PR build-dockerfile is ALSO "skipped"
-    # (its own ref check fails) -- previously that "skipped" alone was
-    # enough to keep this job off PRs, since only 'success' was accepted.
-    # Accepting 'skipped' for the common amd64-only case reopened that gap.
+    # build-dockerfile's result is NOT a reliable 'success'/'skipped' signal
+    # to gate on anymore: with an empty matrix (matrix-secondary=[], the
+    # common case -- only amd64 was requested, and that digest already came
+    # from `test` itself) the job generates zero run instances and doesn't
+    # even show up in the run's job list, let alone report a clean
+    # 'skipped'. So: only explicitly BLOCK on build-dockerfile actually
+    # failing/being cancelled (real secondary-platform build gone wrong);
+    # accept anything else. has-dhi/ref/test are checked explicitly instead
+    # of relying on build-dockerfile's own gating to imply them (it's
+    # "skipped" on a PR too, for an unrelated reason -- its own ref check).
     if: >-
       (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) &&
       needs.check-dhi.outputs.has-dhi == 'false' && needs.test.result == 'success' &&
-      (needs.build-dockerfile.result == 'success' || needs.build-dockerfile.result == 'skipped')
+      needs.build-dockerfile.result != 'failure' && needs.build-dockerfile.result != 'cancelled'
     runs-on: ubuntu-latest
     strategy:
       matrix:
