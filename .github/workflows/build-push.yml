@@ -243,7 +243,7 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-          tags: docker.io/jbsky/clamav-hardened:latest
+          tags: ${{ env.PUBLISH != 'true' && 'docker.io/jbsky/clamav-hardened:latest' || '' }}
           cache-from: type=gha,scope=clamav-hardened-linux/amd64
           cache-to: type=gha,mode=max,scope=clamav-hardened-linux/amd64
 
@@ -261,7 +261,7 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-          tags: docker.io/jbsky/c-icap-hardened:latest
+          tags: ${{ env.PUBLISH != 'true' && 'docker.io/jbsky/c-icap-hardened:latest' || '' }}
           cache-from: type=gha,scope=c-icap-hardened-linux/amd64
           cache-to: type=gha,mode=max,scope=c-icap-hardened-linux/amd64
 
@@ -279,7 +279,7 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-          tags: docker.io/jbsky/squid-hardened:latest
+          tags: ${{ env.PUBLISH != 'true' && 'docker.io/jbsky/squid-hardened:latest' || '' }}
           cache-from: type=gha,scope=squid-hardened-linux/amd64
           cache-to: type=gha,mode=max,scope=squid-hardened-linux/amd64
 
