@@ -102,11 +102,57 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
       - name: Generate SSL-bump CA (required by squid-explicit.conf)
         run: ./scripts/generate-ca.sh
 
-      - name: Build & start stack
-        run: docker compose --profile explicit up -d --build
+      # squid and c-icap compile from source (~9-10 min for squid alone).
+      # Two prior attempts at sharing build-dockerfile's `type=gha` cache
+      # through `docker compose build`/`buildx bake` (docker-compose.ci.yml
+      # override, then COMPOSE_BAKE=true) both wrote valid cache entries but
+      # never actually got a hit from build-dockerfile's cache -- no
+      # measurable speedup either time, most likely a cache-key mismatch
+      # between compose/bake's build invocation and build-push-action's.
+      # Using the exact same action build-dockerfile uses below, with the
+      # exact same cache scope, sidesteps that entirely: same tool, same
+      # key derivation, guaranteed-compatible cache.
+      - name: Build clamav-hardened (load, shared gha cache)
+        uses: docker/build-push-action@v7
+        with:
+          context: clamav/
+          file: clamav/Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: docker.io/jbsky/clamav-hardened:latest
+          cache-from: type=gha,scope=clamav-hardened-linux/amd64
+          cache-to: type=gha,mode=max,scope=clamav-hardened-linux/amd64
+
+      - name: Build c-icap-hardened (load, shared gha cache)
+        uses: docker/build-push-action@v7
+        with:
+          context: c-icap/
+          file: c-icap/Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: docker.io/jbsky/c-icap-hardened:latest
+          cache-from: type=gha,scope=c-icap-hardened-linux/amd64
+          cache-to: type=gha,mode=max,scope=c-icap-hardened-linux/amd64
+
+      - name: Build squid-hardened (load, shared gha cache)
+        uses: docker/build-push-action@v7
+        with:
+          context: squid/
+          file: squid/Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: docker.io/jbsky/squid-hardened:latest
+          cache-from: type=gha,scope=squid-hardened-linux/amd64
+          cache-to: type=gha,mode=max,scope=squid-hardened-linux/amd64
+
+      - name: Start stack (images already built above)
+        run: docker compose --profile explicit up -d --no-build
 
       - name: Wait for clamav + c-icap + squid-explicit healthy
         run: |
