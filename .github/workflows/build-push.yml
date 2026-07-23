@@ -539,7 +539,11 @@ jobs:
   # -------------------------------------------------------------------
   build-dhi:
     name: DHI – ${{ matrix.image.name }} (${{ matrix.platform }})
-    needs: [check-dhi, validate-dhi, compute-platforms, test]
+    # Independent of build/test (separate build system, no shared
+    # digest), so it runs in parallel rather than waiting on the amd64
+    # functional test -- merge-dhi below explicitly re-checks
+    # needs.test.result, so a failed amd64 test still blocks publishing.
+    needs: [check-dhi, validate-dhi, compute-platforms]
     runs-on: ubuntu-latest
     if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && needs.check-dhi.outputs.has-dhi == 'true'
     strategy:
@@ -631,8 +635,8 @@ jobs:
   # -------------------------------------------------------------------
   merge-dhi:
     name: Merge DHI – ${{ matrix.image.name }}
-    needs: [build-dhi, check-dhi]
-    if: needs.build-dhi.result == 'success'
+    needs: [build-dhi, check-dhi, test]
+    if: needs.build-dhi.result == 'success' && needs.test.result == 'success'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -769,7 +773,12 @@ jobs:
   # -------------------------------------------------------------------
   build-dockerfile:
     name: Build – ${{ matrix.image.name }} (${{ matrix.platform }})
-    needs: [check-dhi, compute-platforms, test]
+    # Independent of build/test (only the amd64 leg overlaps, and that
+    # leg is a no-op -- see below), so it runs in parallel rather than
+    # waiting on the amd64 functional test -- merge-dockerfile below
+    # explicitly re-checks needs.test.result, so a failed amd64 test
+    # still blocks publishing.
+    needs: [check-dhi, compute-platforms]
     runs-on: ubuntu-latest
     # Runs on main push or tags when DHI secrets are NOT available (fallback)
     if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && needs.check-dhi.outputs.has-dhi == 'false'
@@ -794,8 +803,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # linux/amd64 is built, pushed by digest, and functionally tested
-      # directly in the `test` job now (guarantees the exact tested digest
+      # linux/amd64 is built and pushed by digest in `build`, then
+      # functionally tested in `test` (guarantees the exact tested digest
       # is what ships, not a separately-rebuilt one) -- every step below
       # that would build/push/export it again is skipped for that platform,
       # this job only does real work for OTHER requested platforms (e.g.
@@ -878,8 +887,8 @@ jobs:
   # -------------------------------------------------------------------
   merge-dockerfile:
     name: Merge – ${{ matrix.image.name }}
-    needs: [build-dockerfile, check-dhi]
-    if: needs.build-dockerfile.result == 'success'
+    needs: [build-dockerfile, check-dhi, test]
+    if: needs.build-dockerfile.result == 'success' && needs.test.result == 'success'
     runs-on: ubuntu-latest
     strategy:
       matrix:
