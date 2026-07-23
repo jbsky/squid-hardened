@@ -91,29 +91,35 @@ jobs:
           scandir: ./scripts
 
   # -------------------------------------------------------------------
-  #  Functional test: build the 3 images locally (plain Dockerfile, not
-  #  DHI) and exercise the real squid -> c-icap -> clamav ICAP chain with
-  #  an EICAR download, gating both publish paths below.
+  #  Build the 3 images locally (plain Dockerfile, not DHI). On a real
+  #  push/tag (never on pull_request -- fork PRs must never get registry
+  #  push credentials) each is pushed BY DIGEST, so `test` below can pull
+  #  those exact digests back and exercise the real squid -> c-icap ->
+  #  clamav ICAP chain with an EICAR download against those literal
+  #  bytes. On a PR there's no registry to push to, so each image is
+  #  instead exported to a local tarball and handed to `test` (a separate
+  #  job/runner) as an artifact.
   # -------------------------------------------------------------------
-  test:
-    name: Functional tests (EICAR)
+  build:
+    name: Build images
     needs: lint
     runs-on: ubuntu-latest
+    outputs:
+      digest-clamav: ${{ steps.build-clamav.outputs.digest }}
+      digest-cicap: ${{ steps.build-cicap.outputs.digest }}
+      digest-squid: ${{ steps.build-squid.outputs.digest }}
     env:
       # true on a real push/tag to this repo (never on pull_request -- fork
       # PRs must never get registry push credentials); gates every
       # push-by-digest / login / digest-export step below. On a PR, images
-      # are still built and functionally tested via `load: true`, just
-      # never pushed anywhere.
+      # are still built and functionally tested (via a tarball handoff to
+      # `test`), just never pushed anywhere.
       PUBLISH: ${{ github.event_name != 'pull_request' && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
-
-      - name: Generate SSL-bump CA (required by squid-explicit.conf)
-        run: ./scripts/generate-ca.sh
 
       - name: Login ghcr.io
         if: env.PUBLISH == 'true'
@@ -221,14 +227,18 @@ jobs:
       # same cache scope, sidesteps that entirely: same tool, same key
       # derivation, guaranteed-compatible cache.
       #
-      # On a real push/tag (PUBLISH=true), each image is pushed by digest
-      # (not loaded) and then pulled back BY THAT EXACT DIGEST for the
-      # functional test below -- not "an image that should be identical
-      # thanks to cache", the literal bytes now sitting in the registry. If
-      # that digest passes, build-dockerfile/merge-dockerfile reuse it
-      # as-is for the published manifest; nothing gets rebuilt between "we
-      # tested this" and "this is what ships". On a PR there's nothing to
-      # promote yet, so `load: true` is enough to validate the code.
+      # On a real push/tag (PUBLISH=true), each image is pushed by digest;
+      # `test` below pulls back BY THAT EXACT DIGEST for the functional
+      # test -- not "an image that should be identical thanks to cache",
+      # the literal bytes now sitting in the registry. If that digest
+      # passes, build-dockerfile/merge-dockerfile reuse it as-is for the
+      # published manifest; nothing gets rebuilt between "we tested this"
+      # and "this is what ships". On a PR there's no registry to push to,
+      # so each image is exported to a local tarball for `test` to load.
+      - name: Make room for local tarball export (PR only)
+        if: env.PUBLISH != 'true'
+        run: mkdir -p /tmp/image-tar
+
       - name: Build clamav-hardened
         id: build-clamav
         uses: docker/build-push-action@v7
@@ -236,8 +246,7 @@ jobs:
           context: clamav/
           file: clamav/Dockerfile
           platforms: linux/amd64
-          load: ${{ env.PUBLISH != 'true' }}
-          outputs: ${{ env.PUBLISH == 'true' && format('type=image,name={0}/{1}/clamav-hardened,push-by-digest=true,name-canonical=true,push=true', env.REGISTRY, env.NAMESPACE) || '' }}
+          outputs: ${{ env.PUBLISH == 'true' && format('type=image,name={0}/{1}/clamav-hardened,push-by-digest=true,name-canonical=true,push=true', env.REGISTRY, env.NAMESPACE) || 'type=docker,dest=/tmp/image-tar/clamav-hardened.tar' }}
           sbom: ${{ env.PUBLISH }}
           provenance: ${{ env.PUBLISH == 'true' && 'mode=max' || 'false' }}
           labels: |
@@ -254,8 +263,7 @@ jobs:
           context: c-icap/
           file: c-icap/Dockerfile
           platforms: linux/amd64
-          load: ${{ env.PUBLISH != 'true' }}
-          outputs: ${{ env.PUBLISH == 'true' && format('type=image,name={0}/{1}/c-icap-hardened,push-by-digest=true,name-canonical=true,push=true', env.REGISTRY, env.NAMESPACE) || '' }}
+          outputs: ${{ env.PUBLISH == 'true' && format('type=image,name={0}/{1}/c-icap-hardened,push-by-digest=true,name-canonical=true,push=true', env.REGISTRY, env.NAMESPACE) || 'type=docker,dest=/tmp/image-tar/c-icap-hardened.tar' }}
           sbom: ${{ env.PUBLISH }}
           provenance: ${{ env.PUBLISH == 'true' && 'mode=max' || 'false' }}
           labels: |
@@ -272,8 +280,7 @@ jobs:
           context: squid/
           file: squid/Dockerfile
           platforms: linux/amd64
-          load: ${{ env.PUBLISH != 'true' }}
-          outputs: ${{ env.PUBLISH == 'true' && format('type=image,name={0}/{1}/squid-hardened,push-by-digest=true,name-canonical=true,push=true', env.REGISTRY, env.NAMESPACE) || '' }}
+          outputs: ${{ env.PUBLISH == 'true' && format('type=image,name={0}/{1}/squid-hardened,push-by-digest=true,name-canonical=true,push=true', env.REGISTRY, env.NAMESPACE) || 'type=docker,dest=/tmp/image-tar/squid-hardened.tar' }}
           sbom: ${{ env.PUBLISH }}
           provenance: ${{ env.PUBLISH == 'true' && 'mode=max' || 'false' }}
           labels: |
@@ -283,19 +290,72 @@ jobs:
           cache-from: type=gha,scope=squid-hardened-linux/amd64
           cache-to: type=gha,mode=max,scope=squid-hardened-linux/amd64
 
+      - name: Upload image tarballs (PR only, for the test job)
+        if: env.PUBLISH != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: image-tar-squid-stack
+          path: /tmp/image-tar/
+          if-no-files-found: error
+          retention-days: 1
+
+  # -------------------------------------------------------------------
+  #  Loads the exact bytes `build` just produced (pulled by digest from
+  #  the registry, or loaded from their tarball artifact on a PR) and
+  #  exercises the real squid -> c-icap -> clamav ICAP chain with an
+  #  EICAR download, gating both publish paths below.
+  # -------------------------------------------------------------------
+  test:
+    name: Functional tests (EICAR)
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      PUBLISH: ${{ github.event_name != 'pull_request' && 'true' || 'false' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Generate SSL-bump CA (required by squid-explicit.conf)
+        run: ./scripts/generate-ca.sh
+
+      - name: Login ghcr.io
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       # Pull back the exact digest just pushed, under the tag docker-compose
       # expects -- guarantees what gets tested below is byte-for-byte what's
       # now in the registry, not a separately-loaded local build.
-      - name: Pull back pushed digests for testing
+      - name: Pull back built digests for testing
         if: env.PUBLISH == 'true'
         run: |
           set -euo pipefail
-          docker pull "${{ env.REGISTRY }}/${{ env.NAMESPACE }}/clamav-hardened@${{ steps.build-clamav.outputs.digest }}"
-          docker tag  "${{ env.REGISTRY }}/${{ env.NAMESPACE }}/clamav-hardened@${{ steps.build-clamav.outputs.digest }}" docker.io/jbsky/clamav-hardened:latest
-          docker pull "${{ env.REGISTRY }}/${{ env.NAMESPACE }}/c-icap-hardened@${{ steps.build-cicap.outputs.digest }}"
-          docker tag  "${{ env.REGISTRY }}/${{ env.NAMESPACE }}/c-icap-hardened@${{ steps.build-cicap.outputs.digest }}" docker.io/jbsky/c-icap-hardened:latest
-          docker pull "${{ env.REGISTRY }}/${{ env.NAMESPACE }}/squid-hardened@${{ steps.build-squid.outputs.digest }}"
-          docker tag  "${{ env.REGISTRY }}/${{ env.NAMESPACE }}/squid-hardened@${{ steps.build-squid.outputs.digest }}" docker.io/jbsky/squid-hardened:latest
+          docker pull "${{ env.REGISTRY }}/${{ env.NAMESPACE }}/clamav-hardened@${{ needs.build.outputs.digest-clamav }}"
+          docker tag  "${{ env.REGISTRY }}/${{ env.NAMESPACE }}/clamav-hardened@${{ needs.build.outputs.digest-clamav }}" docker.io/jbsky/clamav-hardened:latest
+          docker pull "${{ env.REGISTRY }}/${{ env.NAMESPACE }}/c-icap-hardened@${{ needs.build.outputs.digest-cicap }}"
+          docker tag  "${{ env.REGISTRY }}/${{ env.NAMESPACE }}/c-icap-hardened@${{ needs.build.outputs.digest-cicap }}" docker.io/jbsky/c-icap-hardened:latest
+          docker pull "${{ env.REGISTRY }}/${{ env.NAMESPACE }}/squid-hardened@${{ needs.build.outputs.digest-squid }}"
+          docker tag  "${{ env.REGISTRY }}/${{ env.NAMESPACE }}/squid-hardened@${{ needs.build.outputs.digest-squid }}" docker.io/jbsky/squid-hardened:latest
+
+      - name: Download image tarballs (PR only)
+        if: env.PUBLISH != 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: image-tar-squid-stack
+          path: /tmp/image-tar
+
+      - name: Load image tarballs (PR only)
+        if: env.PUBLISH != 'true'
+        run: |
+          set -euo pipefail
+          docker load -i /tmp/image-tar/clamav-hardened.tar
+          docker load -i /tmp/image-tar/c-icap-hardened.tar
+          docker load -i /tmp/image-tar/squid-hardened.tar
 
       - name: Start stack (images already built/pulled above)
         run: docker compose --profile explicit up -d --no-build
@@ -349,9 +409,9 @@ jobs:
         run: |
           set -euo pipefail
           declare -A digests=(
-            [clamav-hardened]="${{ steps.build-clamav.outputs.digest }}"
-            [c-icap-hardened]="${{ steps.build-cicap.outputs.digest }}"
-            [squid-hardened]="${{ steps.build-squid.outputs.digest }}"
+            [clamav-hardened]="${{ needs.build.outputs.digest-clamav }}"
+            [c-icap-hardened]="${{ needs.build.outputs.digest-cicap }}"
+            [squid-hardened]="${{ needs.build.outputs.digest-squid }}"
           )
           for name in "${!digests[@]}"; do
             mkdir -p "/tmp/digests/${name}"
