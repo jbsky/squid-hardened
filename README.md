@@ -153,13 +153,24 @@ Adapter impérativement les IP et interfaces (`eth0/1/2`, sous-réseaux) à votr
 
 ## Logs
 
-Tous les logs sont en `/var/log/{squid,c-icap,clamav}` dans les conteneurs, persistés via des volumes nommés.
+Squid n'écrit **aucun fichier de log** : les configs livrées pointent
+`access_log` sur `stdio:/dev/stdout` et `cache_log` sur `stdio:/dev/stderr`.
+L'image est `FROM scratch` — un fichier sous `/var/log/squid` finirait dans la
+couche overlay éphémère du conteneur : illisible (pas de shell pour l'ouvrir),
+sans rotation, et perdu à chaque recréation. La collecte est donc celle du
+runtime : `docker logs` / `podman logs`, ou journald → rsyslog → SIEM.
+
+> Le `CMD` de l'image n'utilise volontairement pas `-d <level>` : avec
+> `cache_log stdio:/dev/stderr`, l'option `-d` fait apparaître **chaque
+> message deux fois** sur stderr. Si vous surchargez le `CMD`, ne le
+> réintroduisez pas.
 
 Format Squid étendu (mode explicite) inclut :
 - SNI TLS (`%ssl::>sni`)
 - Mode bump utilisé (`%ssl::bump_mode`)
 
-Pour SIEM/ELK : monter un sidecar `filebeat` ou exporter en stdout (commentaires dans la conf).
+Pour un SIEM, préférer un `access_log udp://<collecteur>:514` dédié (exemple
+commenté dans `squid/squid-vyos.conf`) plutôt qu'un sidecar de tail de fichier.
 
 ## Test EICAR
 

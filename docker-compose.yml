@@ -113,7 +113,6 @@ services:
       - ./squid/squid-transparent.conf:/etc/squid/squid.conf:ro
       - ./squid/conf.d:/etc/squid/conf.d:ro
       - squid_tx_spool:/var/spool/squid
-      - squid_tx_log:/var/log/squid
     tmpfs:
       - /tmp:size=256m,mode=1777,nodev,nosuid,noexec
       - /run:size=16m,mode=0755,uid=3128,gid=3128
@@ -145,7 +144,6 @@ services:
       - ./certs:/etc/squid/ssl_cert:ro
       - squid_ex_spool:/var/spool/squid
       - squid_ex_ssldb:/var/lib/ssl_db
-      - squid_ex_log:/var/log/squid
     tmpfs:
       - /tmp:size=256m,mode=1777,nodev,nosuid,noexec
       - /run:size=16m,mode=0755,uid=3128,gid=3128
@@ -180,7 +178,6 @@ services:
       - ./certs:/etc/squid/ssl_cert:ro
       - squid_mm_spool:/var/spool/squid
       - squid_mm_ssldb:/var/lib/ssl_db
-      - squid_mm_log:/var/log/squid
     tmpfs:
       - /tmp:size=256m,mode=1777,nodev,nosuid,noexec
       - /run:size=16m,mode=0755,uid=3128,gid=3128
@@ -199,13 +196,10 @@ volumes:
   clamav_log:      { driver: local }
   cicap_log:       { driver: local }
   squid_tx_spool:  { driver: local }
-  squid_tx_log:    { driver: local }
   squid_ex_spool:  { driver: local }
   squid_ex_ssldb:  { driver: local }
-  squid_ex_log:    { driver: local }
   squid_mm_spool:  { driver: local }
   squid_mm_ssldb:  { driver: local }
-  squid_mm_log:    { driver: local }
 
 # =====================================================================
 #  docker-compose.dhi.yml  (à utiliser via -f si tu as dhi.io auth)

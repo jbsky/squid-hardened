@@ -532,8 +532,10 @@ If the client has a shell:
 curl -v https://example.com 2>&1 | head -20
 ```
 
-Check Squid's access.log for the connection (look for `intercept_https` port
-name and `splice` or `bump` mode).
+Check Squid's access log for the connection — it goes to stdout, not to a file
+(FROM scratch image): `journalctl -u vyos-container-squid.service` on VyOS, or
+`podman logs squid`. Look for the `intercept_https` port name and the `splice`
+or `bump` mode.
 
 ---
 

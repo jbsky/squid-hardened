@@ -219,4 +219,10 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD ["/usr/local/bin/init", "--healthcheck"]
 
 ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/init"]
-CMD ["squid", "-N", "-d", "1", "-f", "/etc/squid/squid.conf"]
+# Pas de "-d <level>" : les configs livrees ecrivent cache_log sur
+# stdio:/dev/stderr, et "-d" duplique en plus chaque message sur stderr
+# (verifie : chaque ligne apparait deux fois). Sans "-d", c'est le module
+# de log qui possede stderr -- une seule copie, et un debug_options releve
+# pour un diagnostic sort aussi sur la console (il serait tronque au
+# niveau de "-d" sinon).
+CMD ["squid", "-N", "-f", "/etc/squid/squid.conf"]
