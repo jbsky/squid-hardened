@@ -68,19 +68,19 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Hadolint – squid/Dockerfile
-        uses: hadolint/hadolint-action@v3.3.0
+        uses: hadolint/hadolint-action@v3.4.0
         with:
           dockerfile: squid/Dockerfile
           failure-threshold: warning
 
       - name: Hadolint – c-icap/Dockerfile
-        uses: hadolint/hadolint-action@v3.3.0
+        uses: hadolint/hadolint-action@v3.4.0
         with:
           dockerfile: c-icap/Dockerfile
           failure-threshold: warning
 
       - name: Hadolint – clamav/Dockerfile
-        uses: hadolint/hadolint-action@v3.3.0
+        uses: hadolint/hadolint-action@v3.4.0
         with:
           dockerfile: clamav/Dockerfile
           failure-threshold: warning
