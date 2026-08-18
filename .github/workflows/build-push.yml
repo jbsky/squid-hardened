@@ -34,6 +34,11 @@ on:
       - 'c-icap/**'
       - 'clamav/**'
       - 'versions.json'
+      # Without this the push trigger builds workflow changes but the PR
+      # trigger does not, so a PR that only edits this file merges with zero
+      # checks and is first exercised on main. The push list above already
+      # includes it; this keeps the two in step.
+      - '.github/workflows/build-push.yml'
   workflow_dispatch:
     inputs:
       platforms:
@@ -648,7 +653,11 @@ jobs:
           - name: c-icap-hardened
             version_key: c-icap
     steps:
+      # fetch-depth 0: build-revision.sh counts commits, a shallow clone
+      # would silently make every image .0
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Download digests
         uses: actions/download-artifact@v8
@@ -667,21 +676,30 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Read upstream version
+      - name: Read upstream version and build revision
         id: upstream
         run: |
+          set -euo pipefail
           VERSION=$(jq -r '."${{ matrix.image.version_key }}"' versions.json)
+          REVISION=$(./scripts/build-revision.sh "${{ matrix.image.version_key }}" \
+            "${{ matrix.image.version_key }}/" versions.json)
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "revision=${VERSION}.${REVISION}" >> "$GITHUB_OUTPUT"
+          echo "Tagging ${{ matrix.image.name }} as ${VERSION}.${REVISION} (and ${VERSION}, latest)"
 
       - name: Create manifest list and push
         id: manifest
         run: |
           set -euo pipefail
           VERSION="${{ steps.upstream.outputs.version }}"
+          REVISION="${{ steps.upstream.outputs.revision }}"
           IMAGE="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}"
 
-          # Build tag flags
-          TAGS="-t ${IMAGE}:${VERSION} -t ${IMAGE}:latest"
+          # Build tag flags. The revisioned tag is the immutable one: :7.6
+          # is overwritten by every rebuild, so without it the build it
+          # replaced becomes unreachable. :7.6 and :latest keep floating to
+          # the newest build so nothing pinning them has to change.
+          TAGS="-t ${IMAGE}:${REVISION} -t ${IMAGE}:${VERSION} -t ${IMAGE}:latest"
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             GIT_VERSION="${GITHUB_REF_NAME#v}"
             TAGS="${TAGS} -t ${IMAGE}:${GIT_VERSION}"
@@ -900,7 +918,11 @@ jobs:
           - name: c-icap-hardened
             version_key: c-icap
     steps:
+      # fetch-depth 0: build-revision.sh counts commits, a shallow clone
+      # would silently make every image .0
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Download digests
         uses: actions/download-artifact@v8
@@ -928,11 +950,16 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Read upstream version
+      - name: Read upstream version and build revision
         id: upstream
         run: |
+          set -euo pipefail
           VERSION=$(jq -r '."${{ matrix.image.version_key }}"' versions.json)
+          REVISION=$(./scripts/build-revision.sh "${{ matrix.image.version_key }}" \
+            "${{ matrix.image.version_key }}/" versions.json)
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "revision=${VERSION}.${REVISION}" >> "$GITHUB_OUTPUT"
+          echo "Tagging ${{ matrix.image.name }} as ${VERSION}.${REVISION} (and ${VERSION}, latest)"
 
       - name: Create manifest list and push
         id: manifest
@@ -942,11 +969,16 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${{ steps.upstream.outputs.version }}"
+          REVISION="${{ steps.upstream.outputs.revision }}"
           IMAGE="${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}"
 
-          # Build tag flags
-          TAGS="-t ${IMAGE}:${VERSION} -t ${IMAGE}:latest"
+          # Build tag flags. The revisioned tag is the immutable one: :7.6
+          # is overwritten by every rebuild, so without it the build it
+          # replaced becomes unreachable. :7.6 and :latest keep floating to
+          # the newest build so nothing pinning them has to change.
+          TAGS="-t ${IMAGE}:${REVISION} -t ${IMAGE}:${VERSION} -t ${IMAGE}:latest"
           if [ "$HAS_DOCKERHUB" = "true" ]; then
+            TAGS="${TAGS} -t docker.io/${DOCKERHUB_NS}/${{ matrix.image.name }}:${REVISION}"
             TAGS="${TAGS} -t docker.io/${DOCKERHUB_NS}/${{ matrix.image.name }}:${VERSION}"
             TAGS="${TAGS} -t docker.io/${DOCKERHUB_NS}/${{ matrix.image.name }}:latest"
           fi
