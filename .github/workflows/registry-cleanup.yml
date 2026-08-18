@@ -21,7 +21,12 @@ on:
   workflow_dispatch:
 
 env:
-  KEEP_COUNT: 3
+  # Counts TAGS, not upstream versions: since every build now pushes its own
+  # revisioned tag (7.6.13), 3 would have meant "the last 3 builds" and would
+  # have retired the previous upstream version almost immediately. 6 keeps a
+  # few revisions of the current version plus room for the one before it.
+  # The short tags (7.6) are protected separately by the prune scripts.
+  KEEP_COUNT: 6
 
 permissions:
   packages: write
@@ -31,6 +36,9 @@ jobs:
     name: Prune old tags — ${{ matrix.image }}
     runs-on: ubuntu-latest
     strategy:
+      # One image failing (GHCR 502s on deep pagination happen) must not cancel
+      # the pruning of the other two and force a full re-run.
+      fail-fast: false
       matrix:
         image: [squid-hardened, c-icap-hardened, clamav-hardened]
     steps:
