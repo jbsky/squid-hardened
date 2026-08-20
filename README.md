@@ -15,6 +15,36 @@ Deux modes opérationnels :
 | **Transparent** | LAN 1 | 3128 (intercept) | DNAT depuis VyOS, HTTP scanné, HTTPS pass-through |
 | **Explicite + SSL Bump** | LAN 2 | 3128 / 3129 (bump) | WPAD via DHCP option 252, HTTPS déchiffré et scanné |
 
+## Tags
+
+Trois tags par image : `latest` (dernier build de `main`), la version amont
+seule, et la version amont suffixee d'un **compteur de revision**. Les deux
+premiers sont **reecrits en place** a chaque rebuild -- bump Alpine, correctif
+CVE, changement de config -- et le build qu'ils designaient devient alors
+inaccessible. **En production, epinglez le tag qui porte le compteur.**
+
+<!-- BEGIN:tags (genere par la CI -- ne pas editer a la main) -->
+| Image | Version amont | Tag immuable a epingler |
+|-------|---------------|-------------------------|
+| `jbsky/squid-hardened` | `7.6` | `7.6.14` |
+| `jbsky/c-icap-hardened` | `0.6.5` | `0.6.5.8` |
+| `jbsky/clamav-hardened` | `1.4.6` | `1.4.6.0` |
+<!-- END:tags -->
+
+Le compteur compte les commits qui touchent les inputs de l'image (`squid/`, `c-icap/` ou `clamav/`, plus `versions.json`)
+depuis le dernier changement de version amont, et repart a `0` a chaque nouvelle
+version amont. Un commit qui ne touche que la CI ne l'incremente pas.
+
+Chaque image a son propre compteur, independant des deux autres. Squid ayant
+une version amont a deux chiffres, son tag immuable en porte trois.
+
+Les deux registres, `docker.io` et `ghcr.io`, publient les memes tags avec le
+meme digest.
+
+> ClamAV vient d'un `apk add clamav` non epingle : sa version suit ce que livre
+> Alpine. La CI verifie a chaque build que le binaire correspond au tag publie,
+> mais un bump Alpine peut la deplacer -- d'ou l'interet d'epingler un tag immuable.
+
 ## Arborescence
 
 ```
