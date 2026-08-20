@@ -33,7 +33,7 @@ inaccessible. **En production, epinglez le tag qui porte le compteur.**
 
 Le compteur compte les commits qui touchent les inputs de l'image (`squid/`, `c-icap/` ou `clamav/`, plus `versions.json`)
 depuis le dernier changement de version amont, et repart a `0` a chaque nouvelle
-version amont. Un commit qui ne touche que la CI ne l'incremente pas.
+version amont. Un commit qui ne touche que `.github/` ne l'incremente pas.
 
 Chaque image a son propre compteur, independant des deux autres. Squid ayant
 une version amont a deux chiffres, son tag immuable en porte trois.
