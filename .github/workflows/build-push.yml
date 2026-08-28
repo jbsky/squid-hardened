@@ -1137,43 +1137,54 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Rewrite tag block
+      # Rewrite + commit in ONE step. They used to be two, and the retry loop
+      # recovered from a lost race with `git pull --rebase || true`: both sides
+      # rewrite the same tag block, so the rebase conflicts, `|| true` swallowed
+      # it, and every later iteration died on "Pulling is not possible because
+      # you have unmerged files" -- a resolvable race turned into a red run
+      # (2026-08-28). The README commit is a DERIVED artifact: on a lost race
+      # the answer is to throw it away, take the new base and regenerate, never
+      # to replay it. Regenerating needs the specs, hence a single step.
+      - name: Rewrite tag block and commit
         run: |
           set -euo pipefail
-          specs=()
-          for key in squid c-icap clamav; do
-            case "$key" in
-              squid)   img=squid-hardened  ;;
-              c-icap)  img=c-icap-hardened ;;
-              clamav)  img=clamav-hardened ;;
-            esac
-            VERSION=$(jq -r --arg k "$key" '.[$k]' versions.json)
-            REVISION=$(./scripts/build-revision.sh "$key" "$key/" versions.json)
-            specs+=("jbsky/${img}=${VERSION}=${VERSION}.${REVISION}")
-          done
-          ./scripts/update-readme-tags.sh "${specs[@]}"
 
-      - name: Commit if changed
-        run: |
-          set -euo pipefail
-          # `git diff --quiet && exit 0` would abort the step under `set -e`
-          # on the branch where there IS a change: use an explicit if.
-          if git diff --quiet README.md; then
-            echo "README already names the current tag"
-            exit 0
-          fi
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add README.md
-          git commit -m "docs(readme): tag immuable courant [skip ci]"
-          # A concurrent publish may have landed first: rebase and retry
-          # rather than fail the run over a race.
+
+          rewrite() {
+            specs=()
+            for key in squid c-icap clamav; do
+              case "$key" in
+                squid)   img=squid-hardened  ;;
+                c-icap)  img=c-icap-hardened ;;
+                clamav)  img=clamav-hardened ;;
+              esac
+              VERSION=$(jq -r --arg k "$key" '.[$k]' versions.json)
+              REVISION=$(./scripts/build-revision.sh "$key" "$key/" versions.json)
+              specs+=("jbsky/${img}=${VERSION}=${VERSION}.${REVISION}")
+            done
+            ./scripts/update-readme-tags.sh "${specs[@]}"
+          }
+
           for attempt in 1 2 3; do
+            rewrite
+            # `git diff --quiet && exit 0` would abort the step under `set -e`
+            # on the branch where there IS a change: use an explicit if.
+            if git diff --quiet README.md; then
+              echo "README already names the current tag"
+              exit 0
+            fi
+            git add README.md
+            git commit -m "docs(readme): tag immuable courant [skip ci]"
             if git push; then
               exit 0
             fi
-            git pull --rebase origin main || true
+            echo "push rejete (publish concurrent) -- on repart de origin/main"
+            git fetch origin main
+            git reset --hard origin/main
           done
+          echo "::error::README tag block: 3 tentatives perdues face a des publish concurrents"
           exit 1
 
   cleanup:
