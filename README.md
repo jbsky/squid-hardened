@@ -26,9 +26,9 @@ inaccessible. **En production, epinglez le tag qui porte le compteur.**
 <!-- BEGIN:tags (genere par la CI -- ne pas editer a la main) -->
 | Image | Version amont | Tag immuable a epingler |
 |-------|---------------|-------------------------|
-| `jbsky/squid-hardened` | `7.6` | `7.6.14` |
-| `jbsky/c-icap-hardened` | `0.6.5` | `0.6.5.8` |
-| `jbsky/clamav-hardened` | `1.4.6` | `1.4.6.0` |
+| `jbsky/squid-hardened` | `7.6` | `7.6.17` |
+| `jbsky/c-icap-hardened` | `0.6.5` | `0.6.5.10` |
+| `jbsky/clamav-hardened` | `1.4.6` | `1.4.6.2` |
 <!-- END:tags -->
 
 Le compteur compte les commits qui touchent les inputs de l'image (`squid/`, `c-icap/` ou `clamav/`, plus `versions.json`)
