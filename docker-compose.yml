@@ -200,13 +200,3 @@ volumes:
   squid_ex_ssldb:  { driver: local }
   squid_mm_spool:  { driver: local }
   squid_mm_ssldb:  { driver: local }
-
-# =====================================================================
-#  docker-compose.dhi.yml  (à utiliser via -f si tu as dhi.io auth)
-#  Surcharge le docker-compose.yml pour utiliser les YAML DHI au lieu
-#  des Dockerfiles classiques. Nécessite docker login dhi.io.
-#
-#  Usage :
-#    docker compose -f docker-compose.yml -f docker-compose.dhi.yml \
-#      --profile explicit up -d
-# =====================================================================

@@ -50,7 +50,6 @@ meme digest.
 ```
 stack-squid/
 ├── docker-compose.yml            # orchestrateur avec profils
-├── docker-compose.dhi.yml        # variante registry privee
 ├── Makefile                      # raccourcis dev
 ├── versions.json                 # versions trackees
 ├── squid/                        # image Squid
