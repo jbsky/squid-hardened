@@ -129,6 +129,31 @@ RUN chown root:cicap /etc/c-icap/*.conf \
 
 # Strip APK/package-manager artifacts
 RUN rm -rf /lib/apk /lib/libapk* /var/cache/apk /etc/apk /sbin/apk
+# Collect exactly the shared objects that ship. Copying /lib and /usr/lib whole
+# defeats the cleanup done above: it carried libapk.so and, on the images that
+# do not delete it, the apk database itself. lddtree lists each binary, its
+# transitive dependencies, symlinks with their targets, and the loader for the
+# architecture being built, so arm64 needs no special case.
+RUN --mount=type=cache,target=/var/cache/apk \
+    apk add --no-cache lddtree \
+ && mkdir -p /rootfs \
+ && find /usr/lib/c_icap -name '*.la' -delete \
+ && test -n "$(find /usr/lib/c_icap -name '*.so' -print -quit)" \
+ && { lddtree -l /usr/bin/c-icap; \
+      find /usr/lib/c_icap -name '*.so' -exec lddtree -l {} +; } > /tmp/closure.list \
+ && sort -u /tmp/closure.list -o /tmp/closure.list \
+ && tar -cf /tmp/closure.tar -T /tmp/closure.list \
+ && tar -xf /tmp/closure.tar -C /rootfs \
+ && rm -f /tmp/closure.list /tmp/closure.tar
+
+# The c-icap modules -- squidclamav.so above all -- are dlopen'd, so they are
+# closure roots, enumerated with find and never a glob: busybox sh hands an
+# unmatched glob through literally. The build refuses to continue if that find
+# comes back empty. The .la libtool archives are link-time metadata, never read
+# at runtime. OpenSSL providers are dlopen'd too; the 1.x engines are unused.
+RUN mkdir -p /rootfs/usr/lib \
+ && cp -a /usr/lib/ossl-modules /rootfs/usr/lib/
+
 
 # ---------- Stage 4 : FROM scratch (final hardened image) -----------
 FROM scratch
@@ -146,8 +171,7 @@ COPY --link --from=prep /etc/passwd /etc/passwd
 COPY --link --from=prep /etc/group  /etc/group
 
 # Dynamic linker (musl) + shared libraries
-COPY --link --from=prep /lib/ /lib/
-COPY --link --from=prep /usr/lib/ /usr/lib/
+COPY --link --from=prep /rootfs/ /
 
 # c-icap binary + modules
 COPY --link --from=prep /usr/bin/c-icap /usr/bin/c-icap

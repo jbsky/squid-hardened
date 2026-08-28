@@ -39,6 +39,25 @@ RUN chown root:clamav /etc/clamav/clamd.conf /etc/clamav/freshclam.conf \
 
 # Strip APK/package-manager artifacts (won't be copied to scratch)
 RUN rm -rf /lib/apk /lib/libapk* /var/cache/apk /etc/apk /sbin/apk
+# Collect exactly the shared objects that ship. Copying /lib and /usr/lib whole
+# defeats the cleanup done above: it carried libapk.so and, on the images that
+# do not delete it, the apk database itself. lddtree lists each binary, its
+# transitive dependencies, symlinks with their targets, and the loader for the
+# architecture being built, so arm64 needs no special case.
+RUN --mount=type=cache,target=/var/cache/apk \
+    apk add --no-cache lddtree \
+ && mkdir -p /rootfs \
+ && lddtree -l /usr/sbin/clamd /usr/bin/freshclam /usr/bin/clamdscan > /tmp/closure.list \
+ && sort -u /tmp/closure.list -o /tmp/closure.list \
+ && tar -cf /tmp/closure.tar -T /tmp/closure.list \
+ && tar -xf /tmp/closure.tar -C /rootfs \
+ && rm -f /tmp/closure.list /tmp/closure.tar
+
+# freshclam fetches signatures over TLS and OpenSSL providers are dlopen'd, so
+# no closure lists them. The 1.x engines (engines-3/) are deprecated and unused.
+RUN mkdir -p /rootfs/usr/lib \
+ && cp -a /usr/lib/ossl-modules /rootfs/usr/lib/
+
 
 # ---------- Stage 2 : Go builder (entrypoint + healthcheck) ---------
 FROM golang:1.26-alpine@sha256:3889b425f035be855a72fb4755265311293b6d414521f0a519d819df32222d83 AS gobuilder
@@ -67,8 +86,7 @@ COPY --link --from=builder /usr/bin/freshclam /usr/bin/freshclam
 COPY --link --from=builder /usr/bin/clamdscan /usr/bin/clamdscan
 
 # Dynamic linker (musl) + shared libraries
-COPY --link --from=builder /usr/lib/ /usr/lib/
-COPY --link --from=builder /lib/     /lib/
+COPY --link --from=builder /rootfs/ /
 
 # Config (with correct ownership from builder stage)
 COPY --link --from=builder /etc/clamav/ /etc/clamav/

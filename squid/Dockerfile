@@ -169,6 +169,31 @@ COPY --from=builder /out/ /
 
 # Strip APK/package-manager artifacts (not needed in final image)
 RUN rm -rf /lib/apk /lib/libapk* /var/cache/apk /etc/apk /sbin/apk
+# Collect exactly the shared objects that ship. Copying /lib and /usr/lib whole
+# defeats the cleanup done above: it carried libapk.so and, on the images that
+# do not delete it, the apk database itself. lddtree lists each binary, its
+# transitive dependencies, symlinks with their targets, and the loader for the
+# architecture being built, so arm64 needs no special case.
+RUN --mount=type=cache,target=/var/cache/apk \
+    apk add --no-cache lddtree \
+ && mkdir -p /rootfs \
+ && test -x /usr/lib/squid/security_file_certgen \
+ && lddtree -l /usr/sbin/squid /usr/lib/squid/security_file_certgen > /tmp/closure.list \
+ && sort -u /tmp/closure.list -o /tmp/closure.list \
+ && tar -cf /tmp/closure.tar -T /tmp/closure.list \
+ && tar -xf /tmp/closure.tar -C /rootfs \
+ && rm -f /tmp/closure.list /tmp/closure.tar
+
+# Only security_file_certgen is kept out of the 25 helpers apk installs in
+# /usr/lib/squid: it is the sslcrtd_program of an SSL-bumping proxy. The LDAP,
+# RADIUS, SASL, PAM and NTLM helpers are referenced by no configuration we ship,
+# and dropping them drops libldap, libsasl2 and libkrb5 with their plugin
+# directories. Re-adding one is a single entry on the lddtree line above.
+# OpenSSL providers are dlopen'd so no closure sees them; the 1.x engines
+# (engines-3/) are deprecated and unused.
+RUN mkdir -p /rootfs/usr/lib \
+ && cp -a /usr/lib/ossl-modules /rootfs/usr/lib/
+
 
 # ---------- Stage 4 : FROM scratch (final hardened image) -----------
 FROM scratch
@@ -186,8 +211,7 @@ COPY --link --from=prep /etc/passwd /etc/passwd
 COPY --link --from=prep /etc/group  /etc/group
 
 # Dynamic linker (musl) + shared libraries
-COPY --link --from=prep /lib/ /lib/
-COPY --link --from=prep /usr/lib/ /usr/lib/
+COPY --link --from=prep /rootfs/ /
 
 # Squid binary + data files (error pages, icons, mime.conf)
 COPY --link --from=prep /usr/sbin/squid /usr/sbin/squid
