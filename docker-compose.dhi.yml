@@ -14,11 +14,6 @@
 # =====================================================================
 
 services:
-  clamav:
-    build:
-      context: ./clamav
-      dockerfile: clamav.yaml          # ← DHI YAML (frontend dhi.io/build:2-alpine3.23)
-
   c-icap:
     build:
       context: ./c-icap

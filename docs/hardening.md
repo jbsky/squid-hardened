@@ -5,17 +5,19 @@ Ce document détaille les choix de sécurité appliqués aux images de cette sta
 ## 1. Construction (build-time)
 
 ### 1.1 Multi-stage
-- **squid** et **c-icap** — 4 stages : `builder` (compilation from source), `gobuilder`
-  (`golang:1.26-alpine`, init Go statique), `prep` (assemblage du filesystem runtime),
-  `scratch` (image finale).
-- **clamav** — 3 stages : pas de `prep`, ClamAV venant des paquets Alpine, le `builder`
-  assemble directement ce qui sera copié.
+Les trois images suivent le même découpage en 4 stages : `builder` (compilation from
+source), `gobuilder` (`golang:1.26-alpine`, init Go statique), `prep` (assemblage du
+filesystem runtime), `scratch` (image finale).
+
+ClamAV n'a rejoint ce schéma qu'en août 2026 : il venait auparavant des paquets Alpine, ce
+qui plafonnait l'image à la version de la branche pinnée (1.4.x) et l'a fait publier deux
+fois sous un tag qui ne correspondait pas à son contenu.
 
 Dans les trois cas le stage final est **`FROM scratch`**, et il ne reçoit que ce que les
 `COPY --from=...` y déposent. Ni le builder ni le gobuilder ne sont publiés.
 
 ### 1.2 Flags de durcissement compilateur
-Squid et c-icap sont compilés avec :
+Les trois moteurs sont compilés avec :
 ```
 CFLAGS  : -O2 -fstack-protector-strong -fstack-clash-protection -fPIE
           -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security
@@ -39,8 +41,11 @@ interpolé accolé à un digest figé, qui laisserait le Dockerfile annoncer une
 construire une autre.
 
 Les archives téléchargées sont vérifiées : signature GPG pour squid (clé squid-cache.org),
-sha256 pinné dans `versions.json` pour c-icap et squidclamav, dont l'amont ne signe pas
-(`c-icap_sha256`, `squidclamav_sha256`). Le hash est vérifié sur un fichier déjà téléchargé,
+signature GPG pour clamav (clé Cisco Talos, `.tar.gz.sig` détachée), sha256 pinné dans
+`versions.json` pour c-icap et squidclamav, dont l'amont ne signe pas (`c-icap_sha256`,
+`squidclamav_sha256`). Les clés publiques sont **committées à côté des Dockerfiles** avec
+leur empreinte épinglée dans un `ARG` : importer une clé puis vérifier avec cette même clé
+ne prouve rien, l'empreinte est l'ancrage. Le hash est vérifié sur un fichier déjà téléchargé,
 jamais au bout d'un pipe : `curl … | sha256sum` renvoie le code de sortie de `sha256sum`, qui
 réussit sur un flux vide. Reste non pinné : les paquets apk.
 

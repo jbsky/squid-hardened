@@ -28,10 +28,12 @@ docker pull dhi.io/build:2-alpine3.23
 
 ```bash
 # Avec les YAML DHI (nécessite docker login dhi.io)
-docker buildx build clamav/ -f clamav/clamav.yaml \
+# (clamav n'a pas de definition DHI : il est compile depuis les sources,
+#  ce que le format YAML declaratif ne peut pas reproduire fidelement)
+docker buildx build squid/ -f squid/squid.yaml \
   --sbom=generator=dhi.io/scout-sbom-indexer:1 \
   --provenance=1 \
-  --tag test-clamav:local --load
+  --tag test-squid:local --load
 
 # Via docker compose + override DHI
 docker compose -f docker-compose.yml -f docker-compose.dhi.yml \

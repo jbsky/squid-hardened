@@ -46,18 +46,23 @@ github_latest_release() {
   echo "$tag" | sed "s/^${prefix}//"
 }
 
-# ClamAV is installed via `apk add clamav` (not compiled from source), so the
-# only version that can ever ship in the image is whatever the pinned Alpine
-# branch carries in its community repo. Tracking Cisco-Talos GitHub releases
-# here is wrong: it produces a version tag that the image never actually
-# contains. Query the Alpine APKINDEX for the pinned branch instead.
+# ClamAV is compiled from source (clamav/Dockerfile), so the tracked version is
+# the upstream release, not whatever the pinned Alpine branch happens to carry.
+#
+# Deliberately no /tags fallback, unlike github_latest_release: this repo's tag
+# list is not version-orderable -- it still carries `clamav-20080204` (a date,
+# which sorts above every real release) next to `r5076` and `merge-llvm-97877`.
+# A missing GitHub release must fail loudly and keep the current version rather
+# than silently promote a 2008 snapshot.
 clamav_latest() {
-  alpine_branch="$1"
-  url="https://dl-cdn.alpinelinux.org/alpine/v${alpine_branch}/community/x86_64/APKINDEX.tar.gz"
-  curl -fsSL --retry 3 "$url" 2>/dev/null \
-    | tar -xzO APKINDEX 2>/dev/null \
-    | awk '/^P:clamav$/{f=1; next} f && /^V:/{print; exit}' \
-    | sed 's/^V://;s/-r[0-9]*$//'
+  url="https://api.github.com/repos/Cisco-Talos/clamav/releases/latest"
+  tag=$(curl -fsSL --retry 3 "$url" 2>/dev/null \
+    | grep '"tag_name"' | head -1 \
+    | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"//;s/".*//')
+  case "$tag" in
+    clamav-[0-9]*) echo "${tag#clamav-}" ;;
+    *) return 1 ;;
+  esac
 }
 
 # Extract latest Squid stable (filter out RC/beta, handle SQUID_x_y_z tags)
@@ -97,7 +102,7 @@ printf 'Checking upstream versions...\n'
 latest_squid=$(squid_latest) || latest_squid="$current_squid"
 latest_cicap=$(github_latest_release "c-icap/c-icap-server" "C_ICAP_") || latest_cicap="$current_cicap"
 latest_squidclamav=$(github_latest_release "darold/squidclamav" "v") || latest_squidclamav="$current_squidclamav"
-latest_clamav=$(clamav_latest "$current_alpine") || latest_clamav="$current_clamav"
+latest_clamav=$(clamav_latest) || latest_clamav="$current_clamav"
 
 # --- Compare ---
 CHANGES=""
@@ -183,6 +188,7 @@ sed -i "s/^ARG CICAP_VERSION=.*/ARG CICAP_VERSION=${latest_cicap}/" "${ROOT_DIR}
 sed -i "s/^ARG CICAP_SHA256=.*/ARG CICAP_SHA256=${latest_cicap_sha256}/" "${ROOT_DIR}/c-icap/Dockerfile"
 sed -i "s/^ARG SQUIDCLAMAV_VERSION=.*/ARG SQUIDCLAMAV_VERSION=${latest_squidclamav}/" "${ROOT_DIR}/c-icap/Dockerfile"
 sed -i "s/^ARG SQUIDCLAMAV_SHA256=.*/ARG SQUIDCLAMAV_SHA256=${latest_squidclamav_sha256}/" "${ROOT_DIR}/c-icap/Dockerfile"
+sed -i "s/^ARG CLAMAV_VERSION=.*/ARG CLAMAV_VERSION=${latest_clamav}/" "${ROOT_DIR}/clamav/Dockerfile"
 
 # 4. .env.example
 sed -i "s/^SQUID_VERSION=.*/SQUID_VERSION=${latest_squid}/" "${ROOT_DIR}/.env.example"
@@ -194,4 +200,5 @@ printf 'Done. Files updated:\n'
 printf '  - versions.json\n'
 printf '  - squid/Dockerfile\n'
 printf '  - c-icap/Dockerfile\n'
+printf '  - clamav/Dockerfile\n'
 printf '  - .env.example\n'

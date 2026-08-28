@@ -64,11 +64,11 @@ stack-squid/
 │   ├── conf.d/nobump_domains.acl # domaines sans SSL Bump
 │   └── nobump_domains.acl        # ACL legacy
 ├── clamav/                       # image ClamAV
-│   ├── Dockerfile                # Multi-stage 3 stages (paquets apk → FROM scratch)
+│   ├── Dockerfile                # Multi-stage 4 stages (compile source → FROM scratch)
+│   ├── clamav-talos.gpg.asc      # cle GPG Cisco Talos (verif du tarball)
 │   ├── go.mod + init.go          # Go static init binary
 │   ├── clamd.conf
-│   ├── freshclam.conf
-│   └── clamav.yaml
+│   └── freshclam.conf
 ├── c-icap/                       # image C-ICAP + squidclamav
 │   ├── Dockerfile
 │   ├── go.mod + init.go          # Go static init binary
@@ -169,12 +169,12 @@ Adapter impérativement les IP et interfaces (`eth0/1/2`, sous-réseaux) à votr
 
 | Mesure | Squid | C-ICAP | ClamAV |
 |---|---|---|---|
-| Multi-stage build | ✅ (4 stages) | ✅ (4 stages) | ✅ (3 stages) |
+| Multi-stage build | ✅ (4 stages) | ✅ (4 stages) | ✅ (4 stages) |
 | Base de l'image finale | `FROM scratch` | `FROM scratch` | `FROM scratch` |
 | Non-root user | uid 3128 | uid 4100 | uid 4000 |
 | `cap_drop: ALL` | ✅ | ✅ | ✅ |
 | `no-new-privileges` | ✅ | ✅ | ✅ |
-| Strip + RELRO + PIE | ✅ | ✅ | n/a — paquet apk, pas de compilation from source |
+| Strip + RELRO + PIE | ✅ | ✅ | ✅ |
 | Tini PID 1 | ✅ | ✅ | ✅ |
 | Read-only friendly | ✅ (sauf cache) | ✅ | ✅ |
 | `tmpfs` /tmp,/run | ✅ | ✅ | ✅ |

@@ -137,15 +137,16 @@ jobs:
       # Scan each image's Alpine runtime-deps stage (moved here from
       # build-dockerfile since amd64 -- the only platform these can --load
       # -- is now always built in this job, never there; runs on every PR
-      # too, not just push). clamav has no separate "prep" stage -- its
-      # builder stage doubles as the runtime-deps assembly, matching
-      # build-dockerfile's original per-image prep-target mapping.
+      # too, not just push). The target is `prep` for all three: it is the
+      # stage that holds exactly the runtime packages that ship. Pointing it
+      # at `builder` would scan the compiler toolchain instead and flood the
+      # SARIF category with CVEs from packages no image ever contains.
       - name: Build prep stage (Alpine with runtime deps) - clamav-hardened
         uses: docker/build-push-action@v7
         with:
           context: clamav/
           file: clamav/Dockerfile
-          target: builder
+          target: prep
           platforms: linux/amd64
           load: true
           tags: clamav-hardened-prep:scan
@@ -564,15 +565,6 @@ jobs:
 
       # On lance un build --load sans push pour valider la syntaxe YAML DHI
       # sur une seule plateforme pour aller vite
-      - name: Validate clamav.yaml
-        run: |
-          docker buildx build clamav/ -f clamav/clamav.yaml \
-            --platform linux/amd64 \
-            --sbom=generator=dhi.io/scout-sbom-indexer:1 \
-            --provenance=1 \
-            --tag dhi-validate-clamav:ci \
-            --load
-
       - name: Validate squid.yaml
         run: |
           docker buildx build squid/ -f squid/squid.yaml \
@@ -608,10 +600,6 @@ jobs:
       fail-fast: false
       matrix:
         image:
-          - name: clamav-hardened
-            definition: clamav/clamav.yaml
-            context: clamav/
-            version_key: clamav
           - name: squid-hardened
             definition: squid/squid.yaml
             context: squid/
@@ -698,9 +686,10 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
+        # clamav is absent on purpose: it has no DHI definition (compiled from
+        # source), so build-dhi publishes no digest for it and this job would
+        # download an artifact that never exists.
         image:
-          - name: clamav-hardened
-            version_key: clamav
           - name: squid-hardened
             version_key: squid
           - name: c-icap-hardened
