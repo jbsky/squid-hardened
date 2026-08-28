@@ -7,7 +7,7 @@
 # the FROM lines below pin tag+digest together as a literal so a version
 # bump requires deliberately re-resolving the digest, not a silent drift
 # if this ARG changes without the pin being updated to match.
-ARG ALPINE_VERSION=3.21
+ARG ALPINE_VERSION=3.24
 ARG CICAP_VERSION=0.6.5
 ARG CICAP_SHA256=82e457b3f234d56f537c70ec76a1d51ce8f6a55522592f2df07fc2557856f184
 ARG SQUIDCLAMAV_VERSION=7.5

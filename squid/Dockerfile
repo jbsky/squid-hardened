@@ -14,7 +14,7 @@ ARG SQUID_VERSION=7.6
 # the FROM lines below pin tag+digest together as a literal so a version
 # bump requires deliberately re-resolving the digest, not a silent drift
 # if this ARG changes without the pin being updated to match.
-ARG ALPINE_VERSION=3.21
+ARG ALPINE_VERSION=3.24
 
 # ---------- Stage 1 : builder ----------------------------------------
 FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS builder
