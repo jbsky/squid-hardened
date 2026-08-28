@@ -86,7 +86,19 @@ RUN make -C /src/c-icap install \
 
 # Strip, then remove /out/var/run created by make install — conflicts with
 # /var/run -> /run symlink
-RUN find /out -type f \( -name '*.so*' -o -perm -111 \) -exec sh -c 'file "$1" 2>/dev/null | grep -q "ELF" && strip "$1" 2>/dev/null || true' _ {} \; \
+# strip, without `|| true`: that suffix turned a strip that fails -- a truncated
+# binary, a read-only file, a missing strip -- into a silent success, and the
+# image shipped with its symbols. The candidates are filtered into a list, then
+# stripped with xargs, so a failure ends the build instead of being swallowed by
+# find, which ignores the exit status of -exec.
+RUN find /out -type f \( -name '*.so*' -o -perm -111 \) > /tmp/cand.list \
+ && : > /tmp/elf.list \
+ && while IFS= read -r f; do \
+      case "$(file -b "$f")" in *ELF*) echo "$f" >> /tmp/elf.list ;; esac; \
+    done < /tmp/cand.list \
+ && test -s /tmp/elf.list \
+ && xargs -r strip --strip-unneeded < /tmp/elf.list \
+ && rm -f /tmp/cand.list /tmp/elf.list \
  && rm -rf /out/var/run
 
 # ---------- Stage 2 : Go builder (entrypoint + healthcheck) ---------
