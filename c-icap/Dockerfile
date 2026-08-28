@@ -150,11 +150,17 @@ RUN --mount=type=cache,target=/var/cache/apk \
  && find /usr/lib/c_icap -name '*.la' -delete \
  && test -n "$(find /usr/lib/c_icap -name '*.so' -print -quit)" \
  && { lddtree -l /usr/bin/c-icap; \
-      find /usr/lib/c_icap -name '*.so' -exec lddtree -l {} +; } > /tmp/closure.list \
+      find /usr/lib/c_icap -name '*.so' -exec lddtree -l {} +; } \
+      > /tmp/closure.list 2> /tmp/closure.err \
+ && if grep -q 'Not found' /tmp/closure.list /tmp/closure.err; then \
+      echo "closure incomplete -- a dependency is missing from this stage:" >&2; \
+      grep 'Not found' /tmp/closure.list /tmp/closure.err >&2; \
+      exit 1; \
+    fi \
  && sort -u /tmp/closure.list -o /tmp/closure.list \
  && tar -cf /tmp/closure.tar -T /tmp/closure.list \
  && tar -xf /tmp/closure.tar -C /rootfs \
- && rm -f /tmp/closure.list /tmp/closure.tar
+ && rm -f /tmp/closure.list /tmp/closure.err /tmp/closure.tar
 
 # The c-icap modules -- squidclamav.so above all -- are dlopen'd, so they are
 # closure roots, enumerated with find and never a glob: busybox sh hands an

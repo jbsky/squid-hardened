@@ -177,11 +177,17 @@ RUN --mount=type=cache,target=/var/cache/apk \
  && mkdir -p /rootfs \
  && test -n "$(find /usr/lib/squid -type f -perm -111 -print -quit)" \
  && { lddtree -l /usr/sbin/squid; \
-      find /usr/lib/squid -type f -perm -111 -exec lddtree -l {} +; } > /tmp/closure.list \
+      find /usr/lib/squid -type f -perm -111 -exec lddtree -l {} +; } \
+      > /tmp/closure.list 2> /tmp/closure.err \
+ && if grep -q 'Not found' /tmp/closure.list /tmp/closure.err; then \
+      echo "closure incomplete -- a dependency is missing from this stage:" >&2; \
+      grep 'Not found' /tmp/closure.list /tmp/closure.err >&2; \
+      exit 1; \
+    fi \
  && sort -u /tmp/closure.list -o /tmp/closure.list \
  && tar -cf /tmp/closure.tar -T /tmp/closure.list \
  && tar -xf /tmp/closure.tar -C /rootfs \
- && rm -f /tmp/closure.list /tmp/closure.tar
+ && rm -f /tmp/closure.list /tmp/closure.err /tmp/closure.tar
 
 # Every helper in /usr/lib/squid is a closure root. Keeping only the ones the
 # configuration names is not safe: several are compiled-in defaults that no
