@@ -167,8 +167,6 @@ RUN apk add --no-cache \
 # Squid binaries + data from builder
 COPY --from=builder /out/ /
 
-# Strip APK/package-manager artifacts (not needed in final image)
-RUN rm -rf /lib/apk /lib/libapk* /var/cache/apk /etc/apk /sbin/apk
 # Collect exactly the shared objects that ship. Copying /lib and /usr/lib whole
 # defeats the cleanup done above: it carried libapk.so and, on the images that
 # do not delete it, the apk database itself. lddtree lists each binary, its
@@ -194,6 +192,8 @@ RUN --mount=type=cache,target=/var/cache/apk \
 RUN mkdir -p /rootfs/usr/lib \
  && cp -a /usr/lib/ossl-modules /rootfs/usr/lib/
 
+# Strip APK/package-manager artifacts (not needed in final image)
+RUN rm -rf /lib/apk /lib/libapk* /var/cache/apk /etc/apk /sbin/apk
 
 # ---------- Stage 4 : FROM scratch (final hardened image) -----------
 FROM scratch
