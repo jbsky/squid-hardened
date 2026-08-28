@@ -4,13 +4,15 @@ Ce document détaille les choix de sécurité appliqués aux images de cette sta
 
 ## 1. Construction (build-time)
 
-### 1.1 Multi-stage (3 stages)
-Chaque image est construite en trois stages :
-1. **builder** — chaîne de compilation complète, compilation from source
-2. **gobuilder** — `golang:1.22-alpine`, compile l'entrypoint Go statique
-3. **runtime** — Alpine minimal, copie uniquement les artefacts (`COPY --from=builder`, `COPY --from=gobuilder`)
+### 1.1 Multi-stage
+- **squid** et **c-icap** — 4 stages : `builder` (compilation from source), `gobuilder`
+  (`golang:1.26-alpine`, init Go statique), `prep` (assemblage du filesystem runtime),
+  `scratch` (image finale).
+- **clamav** — 3 stages : pas de `prep`, ClamAV venant des paquets Alpine, le `builder`
+  assemble directement ce qui sera copié.
 
-Ni le builder ni le gobuilder ne sont publiés.
+Dans les trois cas le stage final est **`FROM scratch`**, et il ne reçoit que ce que les
+`COPY --from=...` y déposent. Ni le builder ni le gobuilder ne sont publiés.
 
 ### 1.2 Flags de durcissement compilateur
 Squid et c-icap sont compilés avec :
@@ -31,20 +33,38 @@ docker run --rm --entrypoint /usr/sbin/squid localhost/squid-hardened:latest -v
 Tous les ELF du stage final sont passés à `strip` pour retirer les symboles de debug → réduction taille + complique reverse engineering.
 
 ### 1.4 Versions épinglées
-Versions explicites via `ARG` : `SQUID_VERSION`, `CICAP_VERSION`, `ALPINE_VERSION`. Pas de `:latest`. Build reproductible (à condition de pinner aussi les paquets apk – TODO si exigé).
+Les versions vivent dans `versions.json`, source unique, et arrivent par `build-args`. Les
+bases sont épinglées `tag@sha256:…` en littéral : pas de `:latest`, et surtout pas de tag
+interpolé accolé à un digest figé, qui laisserait le Dockerfile annoncer une version et en
+construire une autre.
+
+Les archives téléchargées sont vérifiées : signature GPG pour squid (clé squid-cache.org),
+sha256 pinné dans `versions.json` pour c-icap et squidclamav, dont l'amont ne signe pas
+(`c-icap_sha256`, `squidclamav_sha256`). Le hash est vérifié sur un fichier déjà téléchargé,
+jamais au bout d'un pipe : `curl … | sha256sum` renvoie le code de sortie de `sha256sum`, qui
+réussit sur un flux vide. Reste non pinné : les paquets apk.
 
 ## 2. Surface d'attaque (runtime image)
 
 ### 2.1 Base minimale
-Alpine 3.20 → ~7 Mo de base, glibc-free (musl).
+Le stage final est `FROM scratch` : l'image ne contient que ce qui y est explicitement copié —
+binaires, bibliothèques musl, certificats racine, données de fuseau horaire. Aucun OS, donc
+aucune base à suivre en CVE. Alpine 3.24 ne sert que dans les stages de build, qui ne sont
+jamais publiés.
 
-### 2.2 Package manager supprimé
-`apk` (binaire, base de données et configuration) est supprimé du stage runtime sur les 3 images (y compris ClamAV où il provient de la base Alpine). Un attaquant ne peut pas installer de paquets supplémentaires.
+### 2.2 Pas de gestionnaire de paquets
+`apk` n'est pas retiré de l'image finale : il n'y arrive jamais. Le stage `scratch` ne reçoit
+que les fichiers listés par les `COPY --from=…`. Ni binaire, ni index, ni dépôt configuré —
+il n'y a rien à partir de quoi installer quoi que ce soit.
 
-### 2.3 Shell-free (Tier 2 — zero shell, zero busybox)
-Les 3 images sont **entièrement dépourvues de shell**. `/bin/sh`, `/bin/busybox` et tous les symlinks busybox sont supprimés du stage runtime. Un attaquant ne peut pas obtenir de shell interactif, même avec un RCE.
+### 2.3 Shell-free (tier Platine — zero shell, zero busybox)
+Les 3 images sont **entièrement dépourvues de shell** : `/bin/sh` et busybox ne sont pas copiés
+dans le stage `scratch`. Un attaquant ne peut pas obtenir de shell interactif, même avec un RCE.
 
-Technique : le dernier `RUN` du Dockerfile fait supprimer busybox par lui-même (le processus shell en mémoire termine avant que le binaire soit effacé du filesystem). Les entrypoints et healthchecks sont des **binaires Go statiques** (`CGO_ENABLED=0`) compilés dans un stage `gobuilder` séparé.
+Il n'y a rien à supprimer. L'ancienne technique du dernier `RUN` qui faisait supprimer busybox
+par lui-même appartenait à la génération précédente, quand le runtime était encore Alpine. Les
+entrypoints et healthchecks sont des **binaires Go statiques** (`CGO_ENABLED=0`) compilés dans
+un stage `gobuilder` séparé.
 
 Vérification :
 ```bash
@@ -164,9 +184,9 @@ cosign generate-key-pair
 cosign sign --key cosign.key registry.local/squid-hardened:latest
 ```
 
-## 10. Entrypoints Go (Tier 2)
+## 10. Entrypoints Go (tier Platine)
 
-Les 3 entrypoints sont des binaires Go statiques (`/usr/local/bin/init`) compilés sans CGO dans un stage `gobuilder` (`golang:1.22-alpine`). Chaque binaire gère à la fois l'initialisation du service et le healthcheck Docker (flag `--healthcheck`).
+Les 3 entrypoints sont des binaires Go statiques (`/usr/local/bin/init`) compilés sans CGO dans un stage `gobuilder` (`golang:1.26-alpine`). Chaque binaire gère à la fois l'initialisation du service et le healthcheck Docker (flag `--healthcheck`).
 
 ### Architecture
 
