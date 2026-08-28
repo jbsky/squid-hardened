@@ -175,18 +175,22 @@ COPY --from=builder /out/ /
 RUN --mount=type=cache,target=/var/cache/apk \
     apk add --no-cache lddtree \
  && mkdir -p /rootfs \
- && test -x /usr/lib/squid/security_file_certgen \
- && lddtree -l /usr/sbin/squid /usr/lib/squid/security_file_certgen > /tmp/closure.list \
+ && test -n "$(find /usr/lib/squid -type f -perm -111 -print -quit)" \
+ && { lddtree -l /usr/sbin/squid; \
+      find /usr/lib/squid -type f -perm -111 -exec lddtree -l {} +; } > /tmp/closure.list \
  && sort -u /tmp/closure.list -o /tmp/closure.list \
  && tar -cf /tmp/closure.tar -T /tmp/closure.list \
  && tar -xf /tmp/closure.tar -C /rootfs \
  && rm -f /tmp/closure.list /tmp/closure.tar
 
-# Only security_file_certgen is kept out of the 25 helpers apk installs in
-# /usr/lib/squid: it is the sslcrtd_program of an SSL-bumping proxy. The LDAP,
-# RADIUS, SASL, PAM and NTLM helpers are referenced by no configuration we ship,
-# and dropping them drops libldap, libsasl2 and libkrb5 with their plugin
-# directories. Re-adding one is a single entry on the lddtree line above.
+# Every helper in /usr/lib/squid is a closure root. Keeping only the ones the
+# configuration names is not safe: several are compiled-in defaults that no
+# directive mentions -- unlinkd is spawned by the UFS store and squid dies with
+# "FATAL: unlinkd_program ... No such file or directory" without it, and
+# log_file_daemon and diskd are in the same category. Trimming this set is
+# possible but has to be done against squid's built-in defaults, not against
+# what the config file happens to reference.
+#
 # OpenSSL providers are dlopen'd so no closure sees them; the 1.x engines
 # (engines-3/) are deprecated and unused.
 RUN mkdir -p /rootfs/usr/lib \
