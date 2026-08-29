@@ -28,7 +28,7 @@ inaccessible. **En production, epinglez le tag qui porte le compteur.**
 |-------|---------------|-------------------------|
 | `jbsky/squid-hardened` | `7.6` | `7.6.21` |
 | `jbsky/c-icap-hardened` | `0.6.5` | `0.6.5.15` |
-| `jbsky/clamav-hardened` | `1.5.4` | `1.5.4.0` |
+| `jbsky/clamav-hardened` | `1.5.4` | `1.5.4.1` |
 <!-- END:tags -->
 
 Le compteur compte les commits qui touchent les inputs de l'image (`squid/`, `c-icap/` ou `clamav/`, plus `versions.json`)
