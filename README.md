@@ -66,8 +66,9 @@ stack-squid/
 │   ├── Dockerfile                # Multi-stage 4 stages (compile source → FROM scratch)
 │   ├── clamav-talos.gpg.asc      # cle GPG Cisco Talos (verif du tarball)
 │   ├── go.mod + init.go          # Go static init binary
-│   ├── clamd.conf
-│   └── freshclam.conf
+│   └── conf/                     # monte sur /etc/clamav (forme du deploiement)
+│       ├── clamd.conf
+│       └── freshclam.conf
 ├── c-icap/                       # image C-ICAP + squidclamav
 │   ├── Dockerfile
 │   ├── go.mod + init.go          # Go static init binary

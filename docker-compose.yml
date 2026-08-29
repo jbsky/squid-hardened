@@ -42,6 +42,11 @@ services:
       proxy_net:
         aliases: [clamav]
     volumes:
+      # Monter la configuration PAR-DESSUS /etc/clamav reproduit la forme reelle
+      # du deploiement VyOS. Sans ce montage, la CI testait une forme que la
+      # production n'a jamais : le 2026-08-29, clamd a boucle 3110 fois en prod
+      # sur un certificat que ce montage masquait, CI verte du debut a la fin.
+      - ./clamav/conf:/etc/clamav:ro
       - clamav_db:/var/lib/clamav
       - clamav_log:/var/log/clamav
     tmpfs:

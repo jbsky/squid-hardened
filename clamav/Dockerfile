@@ -111,7 +111,7 @@ RUN cmake .. \
         -DCMAKE_MODULE_LINKER_FLAGS="-Wl,-z,relro,-z,now,-z,noexecstack" \
         -DAPP_CONFIG_DIRECTORY=/etc/clamav \
         -DDATABASE_DIRECTORY=/var/lib/clamav \
-        -DCVD_CERTS_DIRECTORY=/etc/clamav/certs \
+        -DCVD_CERTS_DIRECTORY=/usr/share/clamav/certs \
         -DCLAMAV_USER=clamav \
         -DCLAMAV_GROUP=clamav \
         -DENABLE_APP=ON \
@@ -191,9 +191,18 @@ COPY --from=builder /out/ /
 # Config files (set ownership + permissions while we have a shell). The whole
 # of /etc/clamav ships, so the upstream *.conf.sample files installed next to
 # them are dropped rather than carried into a zero-shell image that can never
-# read them. certs/clamav.crt stays: freshclam verifies signed CVDs with it.
-COPY clamd.conf      /etc/clamav/clamd.conf
-COPY freshclam.conf  /etc/clamav/freshclam.conf
+# read them.
+#
+# Le certificat de verification des CVD n'est PAS dans /etc/clamav : depuis
+# ClamAV 1.5 la verification de signature est obligatoire, et un deploiement
+# qui bind-monte sa configuration sur /etc/clamav masquerait le certificat
+# livre par l'image. Constate en production le 2026-08-29 : clamd sortait en
+# boucle sur « Invalid certs directory '/etc/clamav/certs' », 3110 redemarrages,
+# alors que le fichier existait bien dans l'image. Le materiel de verification
+# appartient a l'image, il vit donc sous /usr/share/clamav/certs, hors de tout
+# chemin qu'un operateur monte.
+COPY conf/clamd.conf      /etc/clamav/clamd.conf
+COPY conf/freshclam.conf  /etc/clamav/freshclam.conf
 RUN rm -f /etc/clamav/*.conf.sample \
  && chown root:clamav /etc/clamav/clamd.conf /etc/clamav/freshclam.conf \
  && chmod 0640        /etc/clamav/clamd.conf /etc/clamav/freshclam.conf
@@ -261,6 +270,8 @@ COPY --link --from=prep /rootfs/ /
 # Config + CVD signing certificates (freshclam refuses unverifiable databases
 # without them since 1.4), with correct ownership from the prep stage
 COPY --link --from=prep /etc/clamav/ /etc/clamav/
+# Certificat de verification des CVD, hors /etc/clamav a dessein (voir prep)
+COPY --link --from=prep /usr/share/clamav/ /usr/share/clamav/
 
 # TLS trust store + timezone data
 COPY --link --from=prep /etc/ssl/ /etc/ssl/
