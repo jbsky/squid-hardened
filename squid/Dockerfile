@@ -119,14 +119,11 @@ RUN ./configure \
 RUN make -j"$(nproc)" \
  && make install DESTDIR=/out
 
-# Strip the main binary unconditionally (must always succeed).
-RUN strip /out/usr/sbin/squid
-
-# Cert helpers are optional depending on build config, so their strip may
-# legitimately find nothing — but don't blanket-swallow real strip failures.
-RUN for f in /out/usr/lib/squid/*-cert.d; do \
-      [ -e "$f" ] && strip "$f"; \
-    done; true
+# Strip every ELF under /out (binaries + helpers). The old code named only
+# /out/usr/sbin/squid : any new binary from `make install` slipped through.
+RUN find /out -type f \( -name '*.a' -o -name '*.la' \) -delete \
+ && find /out -type f \( -executable -o -name '*.so*' \) \
+      -exec strip --strip-unneeded {} +
 
 # Remove /out/var/run (conflicts with /run symlink) + copy mime.conf
 RUN rm -rf /out/var/run \
