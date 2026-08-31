@@ -219,6 +219,22 @@ RUN rm -f /etc/clamav/*.conf.sample \
 # The "Not found" guard is not decoration: lddtree reports a missing library
 # on stderr and still EXITS 0, so without it the build happily ships a closure
 # with a hole in it and the failure only surfaces at container start.
+#
+# lddtree prints each binary it is handed, so this list holds the roots as well
+# as their dependencies -- and every one of those roots is copied again, on its
+# own COPY line, in the final stage. Layers are not deduplicated, so clamd, freshclam and clamdscan was
+# going out twice: 0,47 Mo of this image. The roots keep their individual COPY
+# and are filtered out of the tar input here; what this archive carries is the
+# dependencies and the loader.
+#
+# Note for whoever adds a file capability here one day: in this image the
+# `COPY /rootfs/ /` comes AFTER the three binaries, the reverse of every other
+# image in the fleet, so the archive's copies are the ones that win. Harmless
+# today (no setcap here), fatal the day there is one -- busybox tar carries no
+# xattr.
+#
+# The completeness check runs on the UNFILTERED list, above: a filter must
+# never be able to hide a missing dependency.
 RUN --mount=type=cache,target=/var/cache/apk \
     apk add --no-cache lddtree \
  && mkdir -p /rootfs \
@@ -232,9 +248,10 @@ RUN --mount=type=cache,target=/var/cache/apk \
       exit 1; \
     fi \
  && sort -u /tmp/closure.list -o /tmp/closure.list \
- && tar -cf /tmp/closure.tar -T /tmp/closure.list \
+ && grep -v -E '^/usr/sbin/clamd$|^/usr/bin/(freshclam|clamdscan)$' /tmp/closure.list > /tmp/closure.deps \
+ && tar -cf /tmp/closure.tar -T /tmp/closure.deps \
  && tar -xf /tmp/closure.tar -C /rootfs \
- && rm -f /tmp/closure.list /tmp/closure.err /tmp/closure.tar
+ && rm -f /tmp/closure.list /tmp/closure.deps /tmp/closure.err /tmp/closure.tar
 
 # freshclam fetches signatures over TLS and OpenSSL providers are dlopen'd, so
 # no closure lists them. The 1.x engines (engines-3/) are deprecated and unused.

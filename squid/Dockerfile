@@ -172,6 +172,21 @@ COPY --from=builder /out/ /
 # do not delete it, the apk database itself. lddtree lists each binary, its
 # transitive dependencies, symlinks with their targets, and the loader for the
 # architecture being built, so arm64 needs no special case.
+#
+# lddtree prints each binary it is handed, so this list holds the roots as well
+# as their dependencies -- and every one of those roots is copied again, on its
+# own COPY line, in the final stage. Layers are not deduplicated, so the squid binary was
+# going out twice: 7,8 Mo of this image. The roots keep their individual COPY
+# and are filtered out of the tar input here; what this archive carries is the
+# dependencies and the loader.
+#
+# Only /usr/sbin/squid is filtered. The helpers under /usr/lib/squid are
+# closure roots too, but the final stage never copies them separately -- they
+# reach the image through this archive alone, and filtering them would delete
+# security_file_certgen, which SSL-bump needs.
+#
+# The completeness check runs on the UNFILTERED list, above: a filter must
+# never be able to hide a missing dependency.
 RUN --mount=type=cache,target=/var/cache/apk \
     apk add --no-cache lddtree \
  && mkdir -p /rootfs \
@@ -185,9 +200,10 @@ RUN --mount=type=cache,target=/var/cache/apk \
       exit 1; \
     fi \
  && sort -u /tmp/closure.list -o /tmp/closure.list \
- && tar -cf /tmp/closure.tar -T /tmp/closure.list \
+ && grep -v -E '^/usr/sbin/squid$' /tmp/closure.list > /tmp/closure.deps \
+ && tar -cf /tmp/closure.tar -T /tmp/closure.deps \
  && tar -xf /tmp/closure.tar -C /rootfs \
- && rm -f /tmp/closure.list /tmp/closure.err /tmp/closure.tar
+ && rm -f /tmp/closure.list /tmp/closure.deps /tmp/closure.err /tmp/closure.tar
 
 # Every helper in /usr/lib/squid is a closure root. Keeping only the ones the
 # configuration names is not safe: several are compiled-in defaults that no
