@@ -121,9 +121,24 @@ RUN make -j"$(nproc)" \
 
 # Strip every ELF under /out (binaries + helpers). The old code named only
 # /out/usr/sbin/squid : any new binary from `make install` slipped through.
+#
+# The candidates cannot go straight to `strip`: /out/usr/lib/squid holds perl
+# and shell helpers (basic_pop3_auth, url_fake_rewrite.sh, helper-mux...) that
+# are executable but not ELF, and strip exits 1 on the first one -- that is what
+# broke the build of 31/08. They are filtered through `file` first, exactly as
+# c-icap and clamav already do. `test -s` is the guard: if `file` ever vanishes
+# the list comes out empty and the build fails instead of shipping unstripped
+# binaries. xargs, not `find -exec`, because busybox find ignores the exit
+# status of what it runs and would swallow a real strip failure.
 RUN find /out -type f \( -name '*.a' -o -name '*.la' \) -delete \
- && find /out -type f \( -executable -o -name '*.so*' \) \
-      -exec strip --strip-unneeded {} +
+ && find /out -type f \( -name '*.so*' -o -perm -111 \) > /tmp/cand.list \
+ && : > /tmp/elf.list \
+ && while IFS= read -r f; do \
+      case "$(file -b "$f")" in *ELF*) echo "$f" >> /tmp/elf.list ;; esac; \
+    done < /tmp/cand.list \
+ && test -s /tmp/elf.list \
+ && xargs -r strip --strip-unneeded < /tmp/elf.list \
+ && rm -f /tmp/cand.list /tmp/elf.list
 
 # Remove /out/var/run (conflicts with /run symlink) + copy mime.conf
 RUN rm -rf /out/var/run \
