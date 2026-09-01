@@ -33,7 +33,7 @@ RUN --mount=type=secret,id=ca-certs,required=false \
  && sed -i 's|https://|http://|g' /etc/apk/repositories \
  && apk add --no-cache \
         build-base autoconf automake libtool pkgconf \
-        curl xz \
+        curl xz file \
         ca-certificates
 
 # 2/2  Development libraries

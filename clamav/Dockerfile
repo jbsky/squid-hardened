@@ -59,7 +59,7 @@ RUN apk add --no-cache \
         curl-dev \
         json-c-dev \
         ncurses-dev \
-        curl \
+        curl file \
         ca-certificates \
         gnupg
 

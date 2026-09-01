@@ -51,6 +51,7 @@ RUN apk add --no-cache \
 RUN apk add --no-cache \
         libxml2-dev \
         libnetfilter_conntrack-dev \
+        file \
         cppunit-dev \
         openldap-dev \
         curl xz \
