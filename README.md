@@ -31,6 +31,10 @@ inaccessible. **En production, epinglez le tag qui porte le compteur.**
 | `jbsky/clamav-hardened` | `1.5.4` | `1.5.4.4` |
 <!-- END:tags -->
 
+Ce tableau, les versions citees dans le texte et les tags qui apparaissent
+dans les exemples sont tous rendus par `scripts/update-readme-tags.sh` apres
+chaque publication -- ne rien editer a la main.
+
 Le compteur compte les commits qui touchent les inputs de l'image (`squid/`, `c-icap/` ou `clamav/`, plus `versions.json`)
 depuis le dernier changement de version amont, et repart a `0` a chaque nouvelle
 version amont. Un commit qui ne touche que `.github/` ne l'incremente pas.
