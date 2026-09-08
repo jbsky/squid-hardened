@@ -1,0 +1,85 @@
+# image-manifest v1
+# image : jbsky/squid-hardened:latest
+# genere par scripts/image-manifest.py -- ne pas editer a la main
+
+f 0644 0:0 - etc/group
+f 0644 0:0 - etc/passwd
+f 0644 0:0 - etc/squid/errorpage.css
+f 0644 0:0 - etc/squid/errorpage.css.default
+f 0644 0:0 - etc/squid/mime.conf
+f 0644 0:0 - etc/squid/mime.conf.default
+f 0644 0:0 - etc/squid/squid.conf
+f 0644 0:0 - etc/squid/squid.conf.default
+f 0644 0:0 - etc/squid/squid.conf.documented
+f 0644 0:0 - etc/ssl/ct_log_list.cnf
+f 0644 0:0 - etc/ssl/ct_log_list.cnf.dist
+f 0644 0:0 - etc/ssl/openssl.cnf
+f 0644 0:0 - etc/ssl/openssl.cnf.dist
+f 0755 0:0 elf lib/ld-musl-x86_64.so.1
+l lib/libc.musl-x86_64.so.1 -> ld-musl-x86_64.so.1
+f 0755 0:0 elf sbin/tini
+l usr/lib/libcap.so.2 -> libcap.so.2.78
+f 0755 0:0 elf usr/lib/libcap.so.2.78
+l usr/lib/libcom_err.so.2 -> libcom_err.so.2.1
+f 0755 0:0 elf usr/lib/libcom_err.so.2.1
+f 0755 0:0 elf usr/lib/libcrypto.so.3
+f 0644 0:0 elf usr/lib/libgcc_s.so.1
+l usr/lib/libgssapi_krb5.so.2 -> libgssapi_krb5.so.2.2
+f 0755 0:0 elf usr/lib/libgssapi_krb5.so.2.2
+l usr/lib/libk5crypto.so.3 -> libk5crypto.so.3.1
+f 0755 0:0 elf usr/lib/libk5crypto.so.3.1
+l usr/lib/libkeyutils.so.1 -> libkeyutils.so.1.10
+f 0755 0:0 elf usr/lib/libkeyutils.so.1.10
+l usr/lib/libkrb5.so.3 -> libkrb5.so.3.3
+f 0755 0:0 elf usr/lib/libkrb5.so.3.3
+l usr/lib/libkrb5support.so.0 -> libkrb5support.so.0.1
+f 0755 0:0 elf usr/lib/libkrb5support.so.0.1
+l usr/lib/liblber.so.2 -> liblber.so.2.0.200
+f 0644 0:0 elf usr/lib/liblber.so.2.0.200
+l usr/lib/libldap.so.2 -> libldap.so.2.0.200
+f 0644 0:0 elf usr/lib/libldap.so.2.0.200
+l usr/lib/libltdl.so.7 -> libltdl.so.7.3.5
+f 0755 0:0 elf usr/lib/libltdl.so.7.3.5
+l usr/lib/libmnl.so.0 -> libmnl.so.0.2.0
+f 0755 0:0 elf usr/lib/libmnl.so.0.2.0
+l usr/lib/libnetfilter_conntrack.so.3 -> libnetfilter_conntrack.so.3.8.0
+f 0755 0:0 elf usr/lib/libnetfilter_conntrack.so.3.8.0
+l usr/lib/libnettle.so.8 -> libnettle.so.8.11
+f 0644 0:0 elf usr/lib/libnettle.so.8.11
+l usr/lib/libnfnetlink.so.0 -> libnfnetlink.so.0.2.0
+f 0755 0:0 elf usr/lib/libnfnetlink.so.0.2.0
+l usr/lib/libsasl2.so.3 -> libsasl2.so.3.0.0
+f 0755 0:0 elf usr/lib/libsasl2.so.3.0.0
+f 0755 0:0 elf usr/lib/libssl.so.3
+l usr/lib/libstdc++.so.6 -> libstdc++.so.6.0.34
+f 0755 0:0 elf usr/lib/libstdc++.so.6.0.34
+f 0755 0:0 elf usr/lib/ossl-modules/legacy.so
+f 0755 0:0 elf usr/lib/squid/basic_getpwnam_auth
+f 0755 0:0 elf usr/lib/squid/basic_ldap_auth
+f 0755 0:0 elf usr/lib/squid/basic_ncsa_auth
+f 0755 0:0 elf usr/lib/squid/basic_radius_auth
+f 0755 0:0 elf usr/lib/squid/basic_sasl_auth
+f 0755 0:0 elf usr/lib/squid/digest_file_auth
+f 0755 0:0 elf usr/lib/squid/digest_ldap_auth
+f 0755 0:0 elf usr/lib/squid/diskd
+f 0755 0:0 elf usr/lib/squid/ext_file_userip_acl
+f 0755 0:0 elf usr/lib/squid/ext_ldap_group_acl
+f 0755 0:0 elf usr/lib/squid/ext_unix_group_acl
+f 0755 0:0 elf usr/lib/squid/log_file_daemon
+f 0755 0:0 elf usr/lib/squid/negotiate_kerberos_auth
+f 0755 0:0 elf usr/lib/squid/negotiate_kerberos_auth_test
+f 0755 0:0 elf usr/lib/squid/negotiate_wrapper_auth
+f 0755 0:0 elf usr/lib/squid/security_file_certgen
+f 0755 0:0 elf usr/lib/squid/unlinkd
+f 0755 0:0 elf usr/lib/squid/url_fake_rewrite
+f 0755 0:0 elf usr/local/bin/init
+f 0755 0:0 elf usr/sbin/squid
+
+count 239 etc/ssl/certs/
+count 727 usr/share/
+count 6 var/
+
+dup 2 1791 etc/squid/errorpage.css etc/squid/errorpage.css.default
+dup 3 12077 etc/squid/mime.conf etc/squid/mime.conf.default usr/share/squid/mime.conf
+dup 2 3049 etc/squid/squid.conf etc/squid/squid.conf.default
+dup 2 12411 etc/ssl/openssl.cnf etc/ssl/openssl.cnf.dist
