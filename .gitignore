@@ -1,31 +1,29 @@
-# Secrets et certificats - ne JAMAIS commit
-.env
-certs/
-*.pem
-*.key
-*.csr
 
+*~
 # Agent instructions (infra-specific, not for public)
 AGENTS.md
-
+certs/
+c-icap/cicap-init
+clamav/clamav-init
+*.csr
+# Docker
+docker-compose.override.yml
+.DS_Store
+.env
+*.key
+*.log
+logs/
+# Logs
+opencode.json
+*.pem
+sbom/
+# SBOM generes
+# Secrets et certificats - ne JAMAIS commit
+squid/squid-init
+*.swo
+*.swp
+# Systeme
+Thumbs.db
 # VyOS infra-specific configs (one-shot migrations, etc.)
 vyos/multimode.config
 vyos/switchover.config
-
-# SBOM generes
-sbom/
-
-# Logs
-*.log
-logs/
-
-# Systeme
-.DS_Store
-Thumbs.db
-*.swp
-*.swo
-*~
-
-# Docker
-docker-compose.override.yml
-opencode.json
