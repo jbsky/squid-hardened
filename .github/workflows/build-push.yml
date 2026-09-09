@@ -552,6 +552,15 @@ jobs:
           ./scripts/image-manifest.py --check docker.io/jbsky/c-icap-hardened:latest -m c-icap/image.manifest
           ./scripts/image-manifest.py --check docker.io/jbsky/clamav-hardened:latest -m clamav/image.manifest
 
+      # Le rapport se lit sur les manifestes, pas sur les images : l'etape
+      # precedente vient de prouver qu'ils coincident.
+      - name: Image inventory (job summary)
+        run: |
+          set -euo pipefail
+          for i in squid c-icap clamav; do
+            ./scripts/image-manifest.py --report -m "$i/image.manifest" >> "$GITHUB_STEP_SUMMARY"
+          done
+
       # `lddtree` signale une dependance introuvable sur stderr et sort quand
       # meme en 0 : un build peut donc publier une image `FROM scratch` a
       # laquelle il manque une bibliotheque, l'erreur ne sortant qu'au
