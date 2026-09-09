@@ -269,3 +269,16 @@ done
 | Cosign signed | OIDC keyless signature via Sigstore transparency log |
 | SBOM | Software Bill of Materials embedded in manifest |
 | SLSA provenance | Build provenance attestation (level 2) |
+
+## Licence
+
+Le contenu de ce depot -- Dockerfiles, binaires `init` en Go, scripts et chaine
+CI -- est sous **Apache-2.0**, voir [`LICENSE`](LICENSE). Copyright 2026 jbsky.
+
+Le logiciel embarque dans les trois images garde le sien : **Squid et ClamAV
+sont sous GPL-2.0-or-later**, **c-icap sous LGPL-2.1-or-later**. Les deux plans
+ne se melangent pas -- chaque `init` est un programme distinct, qui execute son
+service sans lui etre lie et sans en reprendre de code.
+
+Contributions : voir [`CONTRIBUTING.md`](CONTRIBUTING.md), un `Signed-off-by`
+est demande.
