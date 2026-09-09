@@ -95,6 +95,48 @@ jobs:
         with:
           scandir: ./scripts
 
+      # Six depots publics et autonomes portent les MEMES scripts, dupliques
+      # parce qu'ils ne peuvent pas se referencer. Rien ne les tenait alignes
+      # que la discipline. Toucher un script partage oblige desormais a
+      # toucher sa reference, donc a le voir dans le diff de la PR. La
+      # divergence ENTRE depots se voit avec
+      # opencode-profile/scripts/check-vendored-sync.sh, qui a les six clones.
+      - name: Vendored scripts unchanged
+        run: sha256sum -c scripts/VENDORED.sha256
+
+      # Trois modules Go dans un depot : chacun a son go.mod, donc `go vet` et
+      # `go test` doivent tourner depuis chaque repertoire. `gofmt`, lui, prend
+      # les trois d'un coup.
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: squid/go.mod
+
+      - name: gofmt
+        run: |
+          set -euo pipefail
+          fmt_out=$(gofmt -l squid c-icap clamav)
+          if [ -n "$fmt_out" ]; then
+            echo "::error::gofmt found unformatted files:"
+            echo "$fmt_out"
+            exit 1
+          fi
+
+      - name: go vet
+        run: |
+          set -euo pipefail
+          for m in squid c-icap clamav; do
+            echo "== $m"
+            (cd "$m" && go vet ./...)
+          done
+
+      - name: go test
+        run: |
+          set -euo pipefail
+          for m in squid c-icap clamav; do
+            echo "== $m"
+            (cd "$m" && go test ./...)
+          done
+
   # -------------------------------------------------------------------
   #  Build the 3 images locally. On a real
   #  push/tag (never on pull_request -- fork PRs must never get registry
@@ -150,6 +192,7 @@ jobs:
           platforms: linux/amd64
           load: true
           tags: clamav-hardened-prep:scan
+          no-cache-filters: prep
           cache-from: type=gha,scope=clamav-hardened-prep
 
       - name: Trivy scan prep stage (Alpine CVEs) - clamav-hardened
@@ -168,6 +211,15 @@ jobs:
           sarif_file: trivy-clamav-hardened-deps.sarif
           category: clamav-hardened-deps
 
+      - name: Trivy gate prep stage (fail on fixable CRITICAL) - clamav-hardened
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: clamav-hardened-prep:scan
+          format: table
+          severity: CRITICAL
+          exit-code: '1'
+          ignore-unfixed: true
+
       - name: Build prep stage (Alpine with runtime deps) - c-icap-hardened
         uses: docker/build-push-action@v7
         with:
@@ -177,6 +229,7 @@ jobs:
           platforms: linux/amd64
           load: true
           tags: c-icap-hardened-prep:scan
+          no-cache-filters: prep
           cache-from: type=gha,scope=c-icap-hardened-prep
 
       - name: Trivy scan prep stage (Alpine CVEs) - c-icap-hardened
@@ -195,6 +248,15 @@ jobs:
           sarif_file: trivy-c-icap-hardened-deps.sarif
           category: c-icap-hardened-deps
 
+      - name: Trivy gate prep stage (fail on fixable CRITICAL) - c-icap-hardened
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: c-icap-hardened-prep:scan
+          format: table
+          severity: CRITICAL
+          exit-code: '1'
+          ignore-unfixed: true
+
       - name: Build prep stage (Alpine with runtime deps) - squid-hardened
         uses: docker/build-push-action@v7
         with:
@@ -204,6 +266,7 @@ jobs:
           platforms: linux/amd64
           load: true
           tags: squid-hardened-prep:scan
+          no-cache-filters: prep
           cache-from: type=gha,scope=squid-hardened-prep
 
       - name: Trivy scan prep stage (Alpine CVEs) - squid-hardened
@@ -221,6 +284,15 @@ jobs:
         with:
           sarif_file: trivy-squid-hardened-deps.sarif
           category: squid-hardened-deps
+
+      - name: Trivy gate prep stage (fail on fixable CRITICAL) - squid-hardened
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: squid-hardened-prep:scan
+          format: table
+          severity: CRITICAL
+          exit-code: '1'
+          ignore-unfixed: true
 
       # squid and c-icap compile from source (~9-10 min for squid alone).
       # Two prior attempts at sharing build-dockerfile's `type=gha` cache
@@ -261,6 +333,13 @@ jobs:
           tags: ${{ env.PUBLISH != 'true' && 'docker.io/jbsky/clamav-hardened:latest' || '' }}
           cache-from: type=gha,scope=clamav-hardened-linux/amd64
           cache-to: type=gha,mode=max,scope=clamav-hardened-linux/amd64
+          # Le stage `prep` porte les paquets Alpine qui finissent dans
+          # l'image. Le servir depuis le cache GHA rend deux controles
+          # menteurs a la fois : le manifeste compare l'image a une reference
+          # generee sur un build frais, et le scan CVE du meme stage examine
+          # des paquets perimes. Un controle dont le resultat depend de l'age
+          # d'un cache invisible ne controle rien. Le cout est un `apk add`.
+          no-cache-filters: prep
 
       - name: Build c-icap-hardened
         id: build-cicap
@@ -278,6 +357,13 @@ jobs:
           tags: ${{ env.PUBLISH != 'true' && 'docker.io/jbsky/c-icap-hardened:latest' || '' }}
           cache-from: type=gha,scope=c-icap-hardened-linux/amd64
           cache-to: type=gha,mode=max,scope=c-icap-hardened-linux/amd64
+          # Le stage `prep` porte les paquets Alpine qui finissent dans
+          # l'image. Le servir depuis le cache GHA rend deux controles
+          # menteurs a la fois : le manifeste compare l'image a une reference
+          # generee sur un build frais, et le scan CVE du meme stage examine
+          # des paquets perimes. Un controle dont le resultat depend de l'age
+          # d'un cache invisible ne controle rien. Le cout est un `apk add`.
+          no-cache-filters: prep
 
       - name: Build squid-hardened
         id: build-squid
@@ -295,6 +381,13 @@ jobs:
           tags: ${{ env.PUBLISH != 'true' && 'docker.io/jbsky/squid-hardened:latest' || '' }}
           cache-from: type=gha,scope=squid-hardened-linux/amd64
           cache-to: type=gha,mode=max,scope=squid-hardened-linux/amd64
+          # Le stage `prep` porte les paquets Alpine qui finissent dans
+          # l'image. Le servir depuis le cache GHA rend deux controles
+          # menteurs a la fois : le manifeste compare l'image a une reference
+          # generee sur un build frais, et le scan CVE du meme stage examine
+          # des paquets perimes. Un controle dont le resultat depend de l'age
+          # d'un cache invisible ne controle rien. Le cout est un `apk add`.
+          no-cache-filters: prep
 
       - name: Upload image tarballs (PR only, for the test job)
         if: env.PUBLISH != 'true'
@@ -458,6 +551,20 @@ jobs:
           ./scripts/image-manifest.py --check docker.io/jbsky/squid-hardened:latest -m squid/image.manifest
           ./scripts/image-manifest.py --check docker.io/jbsky/c-icap-hardened:latest -m c-icap/image.manifest
           ./scripts/image-manifest.py --check docker.io/jbsky/clamav-hardened:latest -m clamav/image.manifest
+
+      # `lddtree` signale une dependance introuvable sur stderr et sort quand
+      # meme en 0 : un build peut donc publier une image `FROM scratch` a
+      # laquelle il manque une bibliotheque, l'erreur ne sortant qu'au
+      # demarrage du conteneur, en production. C'est exactement ce qui est
+      # arrive ici le 2026-08-28 : `apk add bzip2` n'installe pas libbz2.so.1
+      # (paquet separe), et clamav-hardened a ete publiee sans elle.
+      - name: Image closure (squid, c-icap, clamav)
+        run: |
+          set -euo pipefail
+          ./scripts/check-image-closure.sh \
+            docker.io/jbsky/squid-hardened:latest \
+            docker.io/jbsky/c-icap-hardened:latest \
+            docker.io/jbsky/clamav-hardened:latest
 
       - name: EICAR test (squid -> c-icap -> clamav)
         run: ./scripts/test-eicar.sh
@@ -623,6 +730,10 @@ jobs:
           outputs: type=image,"name=${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}",push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=${{ matrix.image.name }}-${{ matrix.platform }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}-${{ matrix.platform }}
+          # Meme raison que sur amd64, et une de plus : deux arches servies
+          # depuis des caches d'ages differents publieraient des versions de
+          # bibliotheques differentes sous un seul tag.
+          no-cache-filters: prep
 
       - name: Export digest
         if: matrix.platform != 'linux/amd64'

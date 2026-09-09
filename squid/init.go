@@ -78,25 +78,14 @@ func ensureWritable(path string, uid, gid int) error {
 		return fmt.Errorf("%s exists but is not a directory", path)
 	}
 	// Fast path: already writable
-	tmp, err := os.CreateTemp(path, ".write-test-*")
-	if err == nil {
-		name := tmp.Name()
-		tmp.Close()
-		os.Remove(name)
+	if writeOK(path) {
 		return nil
 	}
 	// Not writable — attempt recursive chown (best-effort, requires CAP_CHOWN)
 	log("%s is not writable by uid %d, attempting chown to %d:%d", path, os.Getuid(), uid, gid)
-	if chErr := chownRecursive(path, uid, gid); chErr == nil {
-		// Retry write test
-		tmp2, err2 := os.CreateTemp(path, ".write-test-*")
-		if err2 == nil {
-			name := tmp2.Name()
-			tmp2.Close()
-			os.Remove(name)
-			log("fixed ownership of %s to %d:%d", path, uid, gid)
-			return nil
-		}
+	if chErr := chownRecursive(path, uid, gid); chErr == nil && writeOK(path) {
+		log("fixed ownership of %s to %d:%d", path, uid, gid)
+		return nil
 	}
 	return fmt.Errorf(
 		"%s is not writable by uid %d.\n"+
@@ -288,6 +277,20 @@ func env(key, def string) string {
 func exists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// writeOK dit si un repertoire accepte reellement une ecriture. mkdir + chmod
+// + chown peuvent tous reussir sur un point de montage en lecture seule :
+// seule une ecriture le prouve.
+func writeOK(dir string) bool {
+	tmp, err := os.CreateTemp(dir, ".write-test-*")
+	if err != nil {
+		return false
+	}
+	name := tmp.Name()
+	tmp.Close()
+	os.Remove(name)
+	return true
 }
 
 func lineStartsWith(text, prefix string) bool {

@@ -143,3 +143,30 @@ func execCmd(args []string) error {
 	}
 	return syscall.Exec(bin, args, os.Environ())
 }
+
+// ---------------------------------------------------------------------------
+// Socle commun aux huit binaires init de la flotte. Meme vocabulaire partout,
+// donc un seul fichier de test (init_test.go) sert les huit depots. Toutes ne
+// sont pas appelees dans chaque image : c'est le prix de l'uniformite, et il
+// est plus faible que celui de trois noms differents pour la meme primitive.
+// ---------------------------------------------------------------------------
+
+// exists dit si un chemin existe, sans rien exiger de son type.
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// writeOK dit si un repertoire accepte reellement une ecriture. mkdir + chmod
+// + chown peuvent tous reussir sur un point de montage en lecture seule :
+// seule une ecriture le prouve.
+func writeOK(dir string) bool {
+	tmp, err := os.CreateTemp(dir, ".write-test-*")
+	if err != nil {
+		return false
+	}
+	name := tmp.Name()
+	tmp.Close()
+	os.Remove(name)
+	return true
+}

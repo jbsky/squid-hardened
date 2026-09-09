@@ -49,15 +49,11 @@ func diagVolume(path string) {
 		}
 	}
 	// write-test
-	tmp, err := os.CreateTemp(path, ".diag-write-test-*")
-	if err != nil {
-		fmt.Printf("[init][diag] write-test %s: FAILED: %v\n", path, err)
-		return
+	if writeOK(path) {
+		fmt.Printf("[init][diag] write-test %s: OK\n", path)
+	} else {
+		fmt.Printf("[init][diag] write-test %s: FAILED\n", path)
 	}
-	name := tmp.Name()
-	tmp.Close()
-	os.Remove(name)
-	fmt.Printf("[init][diag] write-test %s: OK\n", path)
 }
 
 // ensureWritable verifies that path is writable by the current process.
@@ -77,25 +73,14 @@ func ensureWritable(path string, uid, gid int) error {
 		return fmt.Errorf("%s exists but is not a directory", path)
 	}
 	// Fast path: already writable
-	tmp, err := os.CreateTemp(path, ".write-test-*")
-	if err == nil {
-		name := tmp.Name()
-		tmp.Close()
-		os.Remove(name)
+	if writeOK(path) {
 		return nil
 	}
 	// Not writable — attempt recursive chown (best-effort, requires CAP_CHOWN)
 	fmt.Printf("[init] %s is not writable by uid %d, attempting chown to %d:%d\n", path, os.Getuid(), uid, gid)
-	if chErr := chownRecursive(path, uid, gid); chErr == nil {
-		// Retry write test
-		tmp2, err2 := os.CreateTemp(path, ".write-test-*")
-		if err2 == nil {
-			name := tmp2.Name()
-			tmp2.Close()
-			os.Remove(name)
-			fmt.Printf("[init] fixed ownership of %s to %d:%d\n", path, uid, gid)
-			return nil
-		}
+	if chErr := chownRecursive(path, uid, gid); chErr == nil && writeOK(path) {
+		fmt.Printf("[init] fixed ownership of %s to %d:%d\n", path, uid, gid)
+		return nil
 	}
 	return fmt.Errorf(
 		"%s is not writable by uid %d.\n"+
@@ -275,4 +260,40 @@ func execCmd(args []string) error {
 		return fmt.Errorf("command not found: %s", args[0])
 	}
 	return syscall.Exec(bin, args, os.Environ())
+}
+
+// ---------------------------------------------------------------------------
+// Socle commun aux huit binaires init de la flotte. Meme vocabulaire partout,
+// donc un seul fichier de test (init_test.go) sert les huit depots. Toutes ne
+// sont pas appelees dans chaque image : c'est le prix de l'uniformite, et il
+// est plus faible que celui de trois noms differents pour la meme primitive.
+// ---------------------------------------------------------------------------
+
+// env rend la valeur par defaut explicite plutot que sous-entendue par un
+// `!= ""` en ligne.
+func env(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+// exists dit si un chemin existe, sans rien exiger de son type.
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// writeOK dit si un repertoire accepte reellement une ecriture. mkdir + chmod
+// + chown peuvent tous reussir sur un point de montage en lecture seule :
+// seule une ecriture le prouve.
+func writeOK(dir string) bool {
+	tmp, err := os.CreateTemp(dir, ".write-test-*")
+	if err != nil {
+		return false
+	}
+	name := tmp.Name()
+	tmp.Close()
+	os.Remove(name)
+	return true
 }
