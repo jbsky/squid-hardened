@@ -1,4 +1,4 @@
-# image-manifest v1
+# image-manifest v2
 # image : jbsky/c-icap-hardened:latest
 # genere par scripts/image-manifest.py -- ne pas editer a la main
 
@@ -24,26 +24,26 @@ f 0755 0:0 elf usr/lib/c_icap/squidclamav.so
 f 0755 0:0 elf usr/lib/c_icap/srv_echo.so
 f 0755 0:0 elf usr/lib/c_icap/srv_ex206.so
 f 0755 0:0 elf usr/lib/c_icap/sys_logger.so
-l usr/lib/libatomic.so.1 -> libatomic.so.1.2.0
-f 0755 0:0 elf usr/lib/libatomic.so.1.2.0
-l usr/lib/libbrotlicommon.so.1 -> libbrotlicommon.so.1.2.0
-f 0755 0:0 elf usr/lib/libbrotlicommon.so.1.2.0
-l usr/lib/libbrotlidec.so.1 -> libbrotlidec.so.1.2.0
-f 0755 0:0 elf usr/lib/libbrotlidec.so.1.2.0
-l usr/lib/libbrotlienc.so.1 -> libbrotlienc.so.1.2.0
-f 0755 0:0 elf usr/lib/libbrotlienc.so.1.2.0
-l usr/lib/libbz2.so.1 -> libbz2.so.1.0.8
-f 0755 0:0 elf usr/lib/libbz2.so.1.0.8
+l usr/lib/libatomic.so.1 -> libatomic.so.1.<version>
+f 0755 0:0 elf usr/lib/libatomic.so.1.<version>
+l usr/lib/libbrotlicommon.so.1 -> libbrotlicommon.so.1.<version>
+f 0755 0:0 elf usr/lib/libbrotlicommon.so.1.<version>
+l usr/lib/libbrotlidec.so.1 -> libbrotlidec.so.1.<version>
+f 0755 0:0 elf usr/lib/libbrotlidec.so.1.<version>
+l usr/lib/libbrotlienc.so.1 -> libbrotlienc.so.1.<version>
+f 0755 0:0 elf usr/lib/libbrotlienc.so.1.<version>
+l usr/lib/libbz2.so.1 -> libbz2.so.1.<version>
+f 0755 0:0 elf usr/lib/libbz2.so.1.<version>
 f 0755 0:0 elf usr/lib/libcrypto.so.3
-l usr/lib/libicapapi.so.6 -> libicapapi.so.6.0.5
-f 0755 0:0 elf usr/lib/libicapapi.so.6.0.5
-l usr/lib/libpcre2-8.so.0 -> libpcre2-8.so.0.16.0
-f 0755 0:0 elf usr/lib/libpcre2-8.so.0.16.0
+l usr/lib/libicapapi.so.6 -> libicapapi.so.6.<version>
+f 0755 0:0 elf usr/lib/libicapapi.so.6.<version>
+l usr/lib/libpcre2-8.so.0 -> libpcre2-8.so.0.<version>
+f 0755 0:0 elf usr/lib/libpcre2-8.so.0.<version>
 f 0755 0:0 elf usr/lib/libssl.so.3
-l usr/lib/libz.so.1 -> libz.so.1.3.2
-f 0755 0:0 elf usr/lib/libz.so.1.3.2
-l usr/lib/libzstd.so.1 -> libzstd.so.1.5.7
-f 0755 0:0 elf usr/lib/libzstd.so.1.5.7
+l usr/lib/libz.so.1 -> libz.so.1.<version>
+f 0755 0:0 elf usr/lib/libz.so.1.<version>
+l usr/lib/libzstd.so.1 -> libzstd.so.1.<version>
+f 0755 0:0 elf usr/lib/libzstd.so.1.<version>
 f 0755 0:0 elf usr/lib/ossl-modules/legacy.so
 f 0755 0:0 elf usr/local/bin/init
 
