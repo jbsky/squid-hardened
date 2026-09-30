@@ -1,4 +1,4 @@
-# image-manifest v2
+# image-manifest v3
 # image : jbsky/squid-hardened:latest
 # genere par scripts/image-manifest.py -- ne pas editer a la main
 
@@ -75,7 +75,7 @@ f 0755 0:0 elf usr/lib/squid/url_fake_rewrite
 f 0755 0:0 elf usr/local/bin/init
 f 0755 0:0 elf usr/sbin/squid
 
-count 239 etc/ssl/certs/
+present etc/ssl/certs/
 count 727 usr/share/
 count 6 var/
 
