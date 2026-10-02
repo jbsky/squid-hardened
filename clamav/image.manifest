@@ -1,4 +1,4 @@
-# image-manifest v2
+# image-manifest v3
 # image : jbsky/clamav-hardened:latest
 # genere par scripts/image-manifest.py -- ne pas editer a la main
 
@@ -66,7 +66,7 @@ f 0755 0:0 elf usr/lib/ossl-modules/legacy.so
 f 0755 0:0 elf usr/local/bin/init
 f 0755 0:0 elf usr/sbin/clamd
 
-count 239 etc/ssl/certs/
+present etc/ssl/certs/
 count 1 run/
 count 627 usr/share/
 count 4 var/
