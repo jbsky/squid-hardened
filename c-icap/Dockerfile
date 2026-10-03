@@ -3,23 +3,22 @@
 #  4-stage build : compile c-icap + squidclamav -> Go init -> prep -> FROM scratch
 # =====================================================================
 
-# ALPINE_VERSION kept for check-versions.sh/versions.json reference only --
-# the FROM lines below pin tag+digest together as a literal so a version
-# bump requires deliberately re-resolving the digest, not a silent drift
-# if this ARG changes without the pin being updated to match.
-ARG ALPINE_VERSION=3.24
-ARG CICAP_VERSION=0.6.5
-ARG CICAP_SHA256=82e457b3f234d56f537c70ec76a1d51ce8f6a55522592f2df07fc2557856f184
-ARG SQUIDCLAMAV_VERSION=7.5
-ARG SQUIDCLAMAV_SHA256=4d076b692e45cb78b384b5c4a1c63f755d565bdc01c732cc5ddbb8b4f046ceae
+# Aucune version ici : versions.json (racine du depot) est la seule source.
+# La CI passe les build-args par jbsky/hardened-ci/versions, `make build` par
+# scripts/versions-build-args.py --docker ; le job lint refuse toute valeur
+# par defaut. Pas d'ARG ALPINE_VERSION : les FROM epinglent tag ET digest, et
+# --check compare ce tag a .alpine.
 
 # ---------- Stage 1 : builder ----------------------------------------
 FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS builder
 
-ARG CICAP_VERSION
-ARG CICAP_SHA256
+ARG C_ICAP_VERSION
+ARG C_ICAP_SHA256
 ARG SQUIDCLAMAV_VERSION
 ARG SQUIDCLAMAV_SHA256
+RUN test -n "${C_ICAP_VERSION}" -a -n "${C_ICAP_SHA256}" \
+         -a -n "${SQUIDCLAMAV_VERSION}" -a -n "${SQUIDCLAMAV_SHA256}" \
+    || { echo "build-args requis depuis versions.json : make build, ou docker build \$(scripts/versions-build-args.py --docker) -f <image>/Dockerfile <image>/" >&2; exit 1; }
 
 ENV CFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIE -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security" \
     CXXFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIE -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security" \
@@ -49,12 +48,12 @@ WORKDIR /src
 # Téléchargement c-icap depuis SourceForge (miroir HTTPS)
 RUN --mount=type=secret,id=ca-certs,required=false \
     [ -f /run/secrets/ca-certs ] && cat /run/secrets/ca-certs >> /etc/ssl/certs/ca-certificates.crt || true \
- && curl -fsSL "https://sourceforge.net/projects/c-icap/files/c-icap/0.6.x/c_icap-${CICAP_VERSION}.tar.gz/download" -o c-icap.tar.gz \
- && printf '%s  c-icap.tar.gz\n' "${CICAP_SHA256}" > c-icap.tar.gz.sha256 \
+ && curl -fsSL "https://sourceforge.net/projects/c-icap/files/c-icap/0.6.x/c_icap-${C_ICAP_VERSION}.tar.gz/download" -o c-icap.tar.gz \
+ && printf '%s  c-icap.tar.gz\n' "${C_ICAP_SHA256}" > c-icap.tar.gz.sha256 \
  && sha256sum -c c-icap.tar.gz.sha256 \
  && rm c-icap.tar.gz.sha256 \
  && tar -xzf c-icap.tar.gz \
- && mv "c_icap-${CICAP_VERSION}" c-icap
+ && mv "c_icap-${C_ICAP_VERSION}" c-icap
 
 WORKDIR /src/c-icap
 RUN ./configure \

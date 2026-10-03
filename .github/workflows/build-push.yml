@@ -104,6 +104,13 @@ jobs:
       - name: Vendored scripts unchanged
         run: sha256sum -c scripts/VENDORED.sha256
 
+      # versions.json est la seule source des versions du build (les trois
+      # images) ; le test unitaire prouve que le controle attrape chaque derive.
+      - name: Versions -- source unique
+        run: |
+          python3 -m unittest discover -s scripts -p 'test_versions_build_args.py' -v
+          ./scripts/versions-build-args.py --check
+
       # Trois modules Go dans un depot : chacun a son go.mod, donc `go vet` et
       # `go test` doivent tourner depuis chaque repertoire. `gofmt`, lui, prend
       # les trois d'un coup.
@@ -165,6 +172,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Build-args generes depuis versions.json (le controle tourne avec) :
+      # chaque docker/build-push-action du job doit les recevoir.
+      - name: Build-args depuis versions.json
+        id: build-args
+        uses: jbsky/hardened-ci/versions@28bf7b0bb40bd7f8e2eaae64534b053e1976bae0 # v0.7.0
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -186,6 +199,7 @@ jobs:
       - name: Build prep stage (Alpine with runtime deps) - clamav-hardened
         uses: docker/build-push-action@v7
         with:
+          build-args: ${{ steps.build-args.outputs.build-args }}
           context: clamav/
           file: clamav/Dockerfile
           target: prep
@@ -242,6 +256,7 @@ jobs:
       - name: Build prep stage (Alpine with runtime deps) - c-icap-hardened
         uses: docker/build-push-action@v7
         with:
+          build-args: ${{ steps.build-args.outputs.build-args }}
           context: c-icap/
           file: c-icap/Dockerfile
           target: prep
@@ -293,6 +308,7 @@ jobs:
       - name: Build prep stage (Alpine with runtime deps) - squid-hardened
         uses: docker/build-push-action@v7
         with:
+          build-args: ${{ steps.build-args.outputs.build-args }}
           context: squid/
           file: squid/Dockerfile
           target: prep
@@ -368,6 +384,7 @@ jobs:
         id: build-clamav
         uses: docker/build-push-action@v7
         with:
+          build-args: ${{ steps.build-args.outputs.build-args }}
           context: clamav/
           file: clamav/Dockerfile
           platforms: linux/amd64
@@ -392,6 +409,7 @@ jobs:
         id: build-cicap
         uses: docker/build-push-action@v7
         with:
+          build-args: ${{ steps.build-args.outputs.build-args }}
           context: c-icap/
           file: c-icap/Dockerfile
           platforms: linux/amd64
@@ -416,6 +434,7 @@ jobs:
         id: build-squid
         uses: docker/build-push-action@v7
         with:
+          build-args: ${{ steps.build-args.outputs.build-args }}
           context: squid/
           file: squid/Dockerfile
           platforms: linux/amd64
@@ -722,6 +741,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Build-args generes depuis versions.json (le controle tourne avec) :
+      # chaque docker/build-push-action du job doit les recevoir.
+      - name: Build-args depuis versions.json
+        id: build-args
+        uses: jbsky/hardened-ci/versions@28bf7b0bb40bd7f8e2eaae64534b053e1976bae0 # v0.7.0
+
       # linux/amd64 is built and pushed by digest in `build`, then
       # functionally tested in `test` (guarantees the exact tested digest
       # is what ships, not a separately-rebuilt one) -- every step below
@@ -766,6 +791,7 @@ jobs:
         id: build
         uses: docker/build-push-action@v7
         with:
+          build-args: ${{ steps.build-args.outputs.build-args }}
           context: ${{ matrix.image.context }}
           file: ${{ matrix.image.dockerfile }}
           platforms: ${{ matrix.platform }}

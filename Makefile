@@ -17,8 +17,13 @@ help:
 	@echo "  make sbom            - Génération SBOM (syft)"
 	@echo "  make clean           - Supprime volumes + images"
 
+# versions.json est la seule source : les Dockerfiles n'ont aucune valeur par
+# defaut ; les build-args passent par scripts/versions-build-args.py (un echec
+# du generateur arrete la recette, pas de $(shell ...) qui l'avalerait).
 build:
-	DOCKER_BUILDKIT=1 $(DC) build --pull
+	@args=$$(./scripts/versions-build-args.py --docker) \
+	  && echo "Build depuis versions.json : $$args" \
+	  && DOCKER_BUILDKIT=1 $(DC) build --pull $$args
 
 ca:
 	./scripts/generate-ca.sh
