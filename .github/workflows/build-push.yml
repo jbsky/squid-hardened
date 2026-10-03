@@ -211,6 +211,25 @@ jobs:
           sarif_file: trivy-clamav-hardened-deps.sarif
           category: clamav-hardened-deps
 
+      # SBOM des paquets du stage prep, attestee sur l'image publiee (job
+      # merge-dockerfile). L'image finale FROM scratch n'a plus de base apk :
+      # c'est le seul moyen de re-auditer plus tard ce qui a ete publie
+      # (cve-watch.yml). prep est reconstruit ici a part du build final : la
+      # SBOM decrit la meme resolution apk a quelques minutes pres.
+      - name: SBOM of prep stage (CycloneDX) - clamav-hardened
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: clamav-hardened-prep:scan
+          format: cyclonedx
+          output: sbom-prep-clamav-hardened.cdx.json
+
+      - name: Upload prep SBOM - clamav-hardened
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbom-prep-clamav-hardened
+          path: sbom-prep-clamav-hardened.cdx.json
+          if-no-files-found: error
+
       - name: Trivy gate prep stage (fail on fixable CRITICAL) - clamav-hardened
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -248,6 +267,20 @@ jobs:
           sarif_file: trivy-c-icap-hardened-deps.sarif
           category: c-icap-hardened-deps
 
+      - name: SBOM of prep stage (CycloneDX) - c-icap-hardened
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: c-icap-hardened-prep:scan
+          format: cyclonedx
+          output: sbom-prep-c-icap-hardened.cdx.json
+
+      - name: Upload prep SBOM - c-icap-hardened
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbom-prep-c-icap-hardened
+          path: sbom-prep-c-icap-hardened.cdx.json
+          if-no-files-found: error
+
       - name: Trivy gate prep stage (fail on fixable CRITICAL) - c-icap-hardened
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -284,6 +317,20 @@ jobs:
         with:
           sarif_file: trivy-squid-hardened-deps.sarif
           category: squid-hardened-deps
+
+      - name: SBOM of prep stage (CycloneDX) - squid-hardened
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: squid-hardened-prep:scan
+          format: cyclonedx
+          output: sbom-prep-squid-hardened.cdx.json
+
+      - name: Upload prep SBOM - squid-hardened
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbom-prep-squid-hardened
+          path: sbom-prep-squid-hardened.cdx.json
+          if-no-files-found: error
 
       - name: Trivy gate prep stage (fail on fixable CRITICAL) - squid-hardened
         uses: aquasecurity/trivy-action@v0.36.0
@@ -903,6 +950,19 @@ jobs:
             COSIGN_REPOSITORY="${IMAGE}" \
               cosign sign --yes "docker.io/${DOCKERHUB_NS}/${{ matrix.image.name }}@${{ steps.manifest.outputs.digest }}"
           fi
+
+      - name: Download prep SBOM
+        if: steps.published.outputs.published == 'false'
+        uses: actions/download-artifact@v8
+        with:
+          name: sbom-prep-${{ matrix.image.name }}
+
+      - name: Attest prep SBOM (CycloneDX)
+        if: steps.published.outputs.published == 'false'
+        run: |
+          set -euo pipefail
+          cosign attest --yes --type cyclonedx --predicate "sbom-prep-${{ matrix.image.name }}.cdx.json" \
+            "${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}@${{ steps.manifest.outputs.digest }}"
 
       - name: Detect scan platform
         if: steps.published.outputs.published == 'false'

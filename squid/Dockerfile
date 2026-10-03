@@ -233,6 +233,11 @@ RUN mkdir -p /rootfs/usr/lib \
  && cp -a /usr/lib/ossl-modules /rootfs/usr/lib/
 
 # Strip APK/package-manager artifacts (not needed in final image)
+# prep garde sa base apk : c'est elle que lisent le scan CVE et la SBOM
+# attachee a l'image publiee. Avant le 2026-10-03 ce rm etait dans prep, et
+# Trivy y voyait « alpine, 0 vulnerabilite » (OpenSSL 3.5.7 passe inapercu).
+# L'image finale tire ses fichiers de prep-clean, sans aucun artefact apk.
+FROM prep AS prep-clean
 RUN rm -rf /lib/apk /lib/libapk* /var/cache/apk /etc/apk /sbin/apk
 
 # ---------- Stage 4 : FROM scratch (final hardened image) -----------
@@ -247,25 +252,25 @@ LABEL org.opencontainers.image.title="squid-hardened" \
       security.hardening.features="from-scratch,go-init,tini-pid1,zero-shell,non-root,compiler-hardening,cosign-signed,sbom,slsa-provenance"
 
 # User accounts (for USER directive and getpwuid lookups via musl)
-COPY --link --from=prep /etc/passwd /etc/passwd
-COPY --link --from=prep /etc/group  /etc/group
+COPY --link --from=prep-clean /etc/passwd /etc/passwd
+COPY --link --from=prep-clean /etc/group  /etc/group
 
 # Dynamic linker (musl) + shared libraries
-COPY --link --from=prep /rootfs/ /
+COPY --link --from=prep-clean /rootfs/ /
 
 # Squid binary + data files (error pages, icons, mime.conf)
-COPY --link --from=prep /usr/sbin/squid /usr/sbin/squid
-COPY --link --from=prep /usr/share/squid/ /usr/share/squid/
+COPY --link --from=prep-clean /usr/sbin/squid /usr/sbin/squid
+COPY --link --from=prep-clean /usr/share/squid/ /usr/share/squid/
 
 # Default config (overridden by volume mount at runtime)
-COPY --link --from=prep /etc/squid/ /etc/squid/
+COPY --link --from=prep-clean /etc/squid/ /etc/squid/
 
 # TLS trust store + timezone data
-COPY --link --from=prep /etc/ssl/ /etc/ssl/
-COPY --link --from=prep /usr/share/zoneinfo/ /usr/share/zoneinfo/
+COPY --link --from=prep-clean /etc/ssl/ /etc/ssl/
+COPY --link --from=prep-clean /usr/share/zoneinfo/ /usr/share/zoneinfo/
 
 # PID 1 — tini-static (no musl dependency for PID 1 reliability)
-COPY --link --from=prep /sbin/tini-static /sbin/tini
+COPY --link --from=prep-clean /sbin/tini-static /sbin/tini
 
 # Go init binary (static, entrypoint + healthcheck + setup-dirs)
 COPY --link --from=gobuilder /init /usr/local/bin/init

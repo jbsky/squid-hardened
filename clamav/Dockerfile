@@ -260,6 +260,11 @@ RUN mkdir -p /rootfs/usr/lib \
  && cp -a /usr/lib/ossl-modules /rootfs/usr/lib/
 
 # Strip APK/package-manager artifacts (won't be copied to scratch)
+# prep garde sa base apk : c'est elle que lisent le scan CVE et la SBOM
+# attachee a l'image publiee. Avant le 2026-10-03 ce rm etait dans prep, et
+# Trivy y voyait « alpine, 0 vulnerabilite » (OpenSSL 3.5.7 passe inapercu).
+# L'image finale tire ses fichiers de prep-clean, sans aucun artefact apk.
+FROM prep AS prep-clean
 RUN rm -rf /lib/apk /lib/libapk* /var/cache/apk /etc/apk /sbin/apk
 
 # ---------- Stage 4 : FROM scratch (final hardened image) -----------
@@ -274,29 +279,29 @@ LABEL org.opencontainers.image.title="clamav-hardened" \
       security.hardening.features="from-scratch,go-init,tini-pid1,zero-shell,non-root,cosign-signed,sbom,slsa-provenance"
 
 # User accounts
-COPY --link --from=prep /etc/passwd /etc/passwd
-COPY --link --from=prep /etc/group  /etc/group
+COPY --link --from=prep-clean /etc/passwd /etc/passwd
+COPY --link --from=prep-clean /etc/group  /etc/group
 
 # ClamAV binaries
-COPY --link --from=prep /usr/sbin/clamd    /usr/sbin/clamd
-COPY --link --from=prep /usr/bin/freshclam /usr/bin/freshclam
-COPY --link --from=prep /usr/bin/clamdscan /usr/bin/clamdscan
+COPY --link --from=prep-clean /usr/sbin/clamd    /usr/sbin/clamd
+COPY --link --from=prep-clean /usr/bin/freshclam /usr/bin/freshclam
+COPY --link --from=prep-clean /usr/bin/clamdscan /usr/bin/clamdscan
 
 # Dynamic linker (musl) + shared libraries
-COPY --link --from=prep /rootfs/ /
+COPY --link --from=prep-clean /rootfs/ /
 
 # Config + CVD signing certificates (freshclam refuses unverifiable databases
 # without them since 1.4), with correct ownership from the prep stage
-COPY --link --from=prep /etc/clamav/ /etc/clamav/
+COPY --link --from=prep-clean /etc/clamav/ /etc/clamav/
 # Certificat de verification des CVD, hors /etc/clamav a dessein (voir prep)
-COPY --link --from=prep /usr/share/clamav/ /usr/share/clamav/
+COPY --link --from=prep-clean /usr/share/clamav/ /usr/share/clamav/
 
 # TLS trust store + timezone data
-COPY --link --from=prep /etc/ssl/ /etc/ssl/
-COPY --link --from=prep /usr/share/zoneinfo/ /usr/share/zoneinfo/
+COPY --link --from=prep-clean /etc/ssl/ /etc/ssl/
+COPY --link --from=prep-clean /usr/share/zoneinfo/ /usr/share/zoneinfo/
 
 # PID 1 — tini-static
-COPY --link --from=prep /sbin/tini-static /sbin/tini
+COPY --link --from=prep-clean /sbin/tini-static /sbin/tini
 
 # Go init binary (static, entrypoint + healthcheck + setup-dirs)
 COPY --link --from=gobuilder /init /usr/local/bin/init
