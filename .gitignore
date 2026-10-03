@@ -27,3 +27,4 @@ Thumbs.db
 # VyOS infra-specific configs (one-shot migrations, etc.)
 vyos/multimode.config
 vyos/switchover.config
+__pycache__/

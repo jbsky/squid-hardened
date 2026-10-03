@@ -9,7 +9,7 @@
 #
 #  Usage: ./scripts/check-versions.sh [--update]
 #    Without --update: prints diff only (exit 0 = no change, exit 2 = updates available)
-#    With --update: writes changes to versions.json + Dockerfiles + .env.example
+#    With --update: writes versions.json only (the single version source)
 # =====================================================================
 set -eu
 
@@ -94,7 +94,6 @@ current_cicap_sha256=$(grep '"c-icap_sha256"' "$VERSIONS_FILE" | sed 's/.*: *"//
 current_squidclamav=$(grep '"squidclamav"' "$VERSIONS_FILE" | sed 's/.*: *"//;s/".*//')
 current_squidclamav_sha256=$(grep '"squidclamav_sha256"' "$VERSIONS_FILE" | sed 's/.*: *"//;s/".*//')
 current_clamav=$(grep '"clamav"' "$VERSIONS_FILE" | sed 's/.*: *"//;s/".*//')
-current_alpine=$(grep '"alpine"' "$VERSIONS_FILE" | sed 's/.*: *"//;s/".*//')
 
 # --- Fetch latest versions ---
 printf 'Checking upstream versions...\n'
@@ -169,36 +168,16 @@ if [ "$latest_squidclamav" != "$current_squidclamav" ]; then
     || die "failed to download squidclamav ${latest_squidclamav} for checksum"
 fi
 
-# 2. versions.json
-cat > "$VERSIONS_FILE" <<EOF
-{
-  "squid": "${latest_squid}",
-  "c-icap": "${latest_cicap}",
-  "c-icap_sha256": "${latest_cicap_sha256}",
-  "squidclamav": "${latest_squidclamav}",
-  "squidclamav_sha256": "${latest_squidclamav_sha256}",
-  "clamav": "${latest_clamav}",
-  "alpine": "${current_alpine}"
-}
-EOF
-
-# 3. Dockerfiles ARG defaults
-sed -i "s/^ARG SQUID_VERSION=.*/ARG SQUID_VERSION=${latest_squid}/" "${ROOT_DIR}/squid/Dockerfile"
-sed -i "s/^ARG CICAP_VERSION=.*/ARG CICAP_VERSION=${latest_cicap}/" "${ROOT_DIR}/c-icap/Dockerfile"
-sed -i "s/^ARG CICAP_SHA256=.*/ARG CICAP_SHA256=${latest_cicap_sha256}/" "${ROOT_DIR}/c-icap/Dockerfile"
-sed -i "s/^ARG SQUIDCLAMAV_VERSION=.*/ARG SQUIDCLAMAV_VERSION=${latest_squidclamav}/" "${ROOT_DIR}/c-icap/Dockerfile"
-sed -i "s/^ARG SQUIDCLAMAV_SHA256=.*/ARG SQUIDCLAMAV_SHA256=${latest_squidclamav_sha256}/" "${ROOT_DIR}/c-icap/Dockerfile"
-sed -i "s/^ARG CLAMAV_VERSION=.*/ARG CLAMAV_VERSION=${latest_clamav}/" "${ROOT_DIR}/clamav/Dockerfile"
-
-# 4. .env.example
-sed -i "s/^SQUID_VERSION=.*/SQUID_VERSION=${latest_squid}/" "${ROOT_DIR}/.env.example"
-sed -i "s/^CICAP_VERSION=.*/CICAP_VERSION=${latest_cicap}/" "${ROOT_DIR}/.env.example"
-sed -i "s/^SQUIDCLAMAV_VERSION=.*/SQUIDCLAMAV_VERSION=${latest_squidclamav}/" "${ROOT_DIR}/.env.example"
-sed -i "s/^CLAMAV_VERSION=.*/CLAMAV_VERSION=${latest_clamav}/" "${ROOT_DIR}/.env.example"
+# 2. versions.json, et rien d'autre : c'est la seule source (les Dockerfiles
+# n'ont plus de valeur par defaut, .env.example plus de version). jq ne touche
+# qu'aux cles suivies ; un modele recopie effacerait une cle qu'il ne connait pas.
+tmp=$(mktemp)
+jq --arg squid "$latest_squid" --arg cicap "$latest_cicap" --arg cicap_sha "$latest_cicap_sha256" \
+   --arg sqc "$latest_squidclamav" --arg sqc_sha "$latest_squidclamav_sha256" --arg clamav "$latest_clamav" \
+   '.squid = $squid | ."c-icap" = $cicap | ."c-icap_sha256" = $cicap_sha
+    | .squidclamav = $sqc | .squidclamav_sha256 = $sqc_sha | .clamav = $clamav' \
+   "$VERSIONS_FILE" > "$tmp"
+mv "$tmp" "$VERSIONS_FILE"
 
 printf 'Done. Files updated:\n'
 printf '  - versions.json\n'
-printf '  - squid/Dockerfile\n'
-printf '  - c-icap/Dockerfile\n'
-printf '  - clamav/Dockerfile\n'
-printf '  - .env.example\n'

@@ -9,18 +9,20 @@
 #   - filesystem read-only friendly
 # =====================================================================
 
-ARG SQUID_VERSION=7.7
-# ALPINE_VERSION kept for check-versions.sh/versions.json reference only --
-# the FROM lines below pin tag+digest together as a literal so a version
-# bump requires deliberately re-resolving the digest, not a silent drift
-# if this ARG changes without the pin being updated to match.
-ARG ALPINE_VERSION=3.24
+# Aucune version ici : versions.json (racine du depot) est la seule source.
+# La CI passe les build-args par jbsky/hardened-ci/versions, `make build` par
+# scripts/versions-build-args.py --docker ; le job lint refuse toute valeur
+# par defaut. Pas d'ARG ALPINE_VERSION : les FROM epinglent tag ET digest, et
+# --check compare ce tag a .alpine.
+ARG SQUID_VERSION
 
 # ---------- Stage 1 : builder ----------------------------------------
 FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS builder
 
 ARG SQUID_VERSION
 SHELL ["/bin/ash", "-eo", "pipefail", "-c"]
+RUN test -n "${SQUID_VERSION}" \
+    || { echo "build-args requis depuis versions.json : make build, ou docker build \$(scripts/versions-build-args.py --docker) -f <image>/Dockerfile <image>/" >&2; exit 1; }
 ENV CFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIE -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security" \
     CXXFLAGS="-O2 -fstack-protector-strong -fstack-clash-protection -fPIE -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security" \
     LDFLAGS="-Wl,-z,relro,-z,now,-z,noexecstack -pie"
