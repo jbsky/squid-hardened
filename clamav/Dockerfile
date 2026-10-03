@@ -169,6 +169,7 @@ SHELL ["/bin/ash", "-eo", "pipefail", "-c"]
 # shared library, so `apk add bzip2` leaves libclamav without libbz2.so.1.
 # libstdc++ is here for libclamunrar, which is C++.
 RUN sed -i 's|https://|http://|g' /etc/apk/repositories \
+ && apk upgrade --no-cache \
  && apk add --no-cache \
         ca-certificates \
         tini-static \
