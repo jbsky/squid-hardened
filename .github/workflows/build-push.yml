@@ -95,14 +95,6 @@ jobs:
         with:
           scandir: ./scripts
 
-      # Six depots publics et autonomes portent les MEMES scripts, dupliques
-      # parce qu'ils ne peuvent pas se referencer. Rien ne les tenait alignes
-      # que la discipline. Toucher un script partage oblige desormais a
-      # toucher sa reference, donc a le voir dans le diff de la PR. La
-      # divergence ENTRE depots se voit avec
-      # opencode-profile/scripts/check-vendored-sync.sh, qui a les six clones.
-      - name: Vendored scripts unchanged
-        run: sha256sum -c scripts/VENDORED.sha256
 
       # versions.json est la seule source des versions du build (les trois
       # images) ; le test unitaire prouve que le controle attrape chaque derive.
@@ -176,7 +168,7 @@ jobs:
       # chaque docker/build-push-action du job doit les recevoir.
       - name: Build-args depuis versions.json
         id: build-args
-        uses: jbsky/hardened-ci/versions@28bf7b0bb40bd7f8e2eaae64534b053e1976bae0 # v0.7.0
+        uses: jbsky/hardened-ci/versions@37f84a73b14b4da3f00004f94977d5f2f35d2635 # v0.8.0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -479,6 +471,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Scripts partages (build-revision, image-manifest, ...) : ceux de
+      # hardened-ci a la ref epinglee, plus aucune copie dans ce depot.
+      - name: Scripts partages de hardened-ci
+        id: hci
+        uses: jbsky/hardened-ci/tools@37f84a73b14b4da3f00004f94977d5f2f35d2635 # v0.8.0
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -614,9 +612,9 @@ jobs:
       - name: Image manifests (squid, c-icap, clamav)
         run: |
           set -euo pipefail
-          ./scripts/image-manifest.py --check docker.io/jbsky/squid-hardened:latest -m squid/image.manifest
-          ./scripts/image-manifest.py --check docker.io/jbsky/c-icap-hardened:latest -m c-icap/image.manifest
-          ./scripts/image-manifest.py --check docker.io/jbsky/clamav-hardened:latest -m clamav/image.manifest
+          "${{ steps.hci.outputs.dir }}/image-manifest.py" --check docker.io/jbsky/squid-hardened:latest -m squid/image.manifest
+          "${{ steps.hci.outputs.dir }}/image-manifest.py" --check docker.io/jbsky/c-icap-hardened:latest -m c-icap/image.manifest
+          "${{ steps.hci.outputs.dir }}/image-manifest.py" --check docker.io/jbsky/clamav-hardened:latest -m clamav/image.manifest
 
       # `lddtree` signale une dependance introuvable sur stderr et sort quand
       # meme en 0 : un build peut donc publier une image `FROM scratch` a
@@ -627,7 +625,7 @@ jobs:
       - name: Image closure (squid, c-icap, clamav)
         run: |
           set -euo pipefail
-          ./scripts/check-image-closure.sh \
+          "${{ steps.hci.outputs.dir }}/check-image-closure.sh" \
             docker.io/jbsky/squid-hardened:latest \
             docker.io/jbsky/c-icap-hardened:latest \
             docker.io/jbsky/clamav-hardened:latest
@@ -745,7 +743,7 @@ jobs:
       # chaque docker/build-push-action du job doit les recevoir.
       - name: Build-args depuis versions.json
         id: build-args
-        uses: jbsky/hardened-ci/versions@28bf7b0bb40bd7f8e2eaae64534b053e1976bae0 # v0.7.0
+        uses: jbsky/hardened-ci/versions@37f84a73b14b4da3f00004f94977d5f2f35d2635 # v0.8.0
 
       # linux/amd64 is built and pushed by digest in `build`, then
       # functionally tested in `test` (guarantees the exact tested digest
@@ -855,6 +853,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Scripts partages (build-revision, image-manifest, ...) : ceux de
+      # hardened-ci a la ref epinglee, plus aucune copie dans ce depot.
+      - name: Scripts partages de hardened-ci
+        id: hci
+        uses: jbsky/hardened-ci/tools@37f84a73b14b4da3f00004f94977d5f2f35d2635 # v0.8.0
+
       - name: Download digests
         uses: actions/download-artifact@v8
         with:
@@ -886,7 +890,7 @@ jobs:
         run: |
           set -euo pipefail
           VERSION=$(jq -r '."${{ matrix.image.version_key }}"' versions.json)
-          REVISION=$(./scripts/build-revision.sh "${{ matrix.image.version_key }}" \
+          REVISION=$("${{ steps.hci.outputs.dir }}/build-revision.sh" "${{ matrix.image.version_key }}" \
             "${{ matrix.image.version_key }}/" versions.json)
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "revision=${VERSION}.${REVISION}" >> "$GITHUB_OUTPUT"
@@ -1072,6 +1076,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Scripts partages (build-revision, image-manifest, ...) : ceux de
+      # hardened-ci a la ref epinglee, plus aucune copie dans ce depot.
+      - name: Scripts partages de hardened-ci
+        id: hci
+        uses: jbsky/hardened-ci/tools@37f84a73b14b4da3f00004f94977d5f2f35d2635 # v0.8.0
+
       # Rewrite + commit in ONE step. They used to be two, and the retry loop
       # recovered from a lost race with `git pull --rebase || true`: both sides
       # rewrite the same tag block, so the rebase conflicts, `|| true` swallowed
@@ -1096,10 +1106,10 @@ jobs:
                 clamav)  img=clamav-hardened ;;
               esac
               VERSION=$(jq -r --arg k "$key" '.[$k]' versions.json)
-              REVISION=$(./scripts/build-revision.sh "$key" "$key/" versions.json)
+              REVISION=$("${{ steps.hci.outputs.dir }}/build-revision.sh" "$key" "$key/" versions.json)
               specs+=("jbsky/${img}=${VERSION}=${VERSION}.${REVISION}")
             done
-            ./scripts/update-readme-tags.sh "${specs[@]}"
+            "${{ steps.hci.outputs.dir }}/update-readme-tags.sh" "${specs[@]}"
           }
 
           for attempt in 1 2 3; do
@@ -1129,7 +1139,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    uses: jbsky/hardened-ci/.github/workflows/registry-cleanup.yml@0910a8f8fcbacbbe655870a91bd0716d949a9c82 # v0.3.0
+    uses: jbsky/hardened-ci/.github/workflows/registry-cleanup.yml@37f84a73b14b4da3f00004f94977d5f2f35d2635 # v0.8.0
     with:
       images: '["squid-hardened","c-icap-hardened","clamav-hardened"]'
     # Explicites : `secrets: inherit` n'est pas garanti entre depots d'un

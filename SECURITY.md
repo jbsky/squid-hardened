@@ -20,8 +20,8 @@ covers):
 | `c-icap-hardened:0.6.4` | Same Go stdlib CVEs (`GO-2026-4970/5856`), fixed for `0.6.5` by the same commit. |
 | `clamav-hardened:1.4.2` | Same Go stdlib CVEs (`GO-2026-4970/5856`), fixed for `1.4.4` by the same commit. |
 
-Fixed by `registry-cleanup.yml` (`scripts/prune-registry-tags.sh` for Docker Hub,
-`scripts/prune-ghcr-tags.sh` for GHCR), called as a job from `build-push.yml` after
+Fixed by `registry-cleanup.yml` (`prune-registry-tags.sh` (jbsky/hardened-ci) for Docker Hub,
+`prune-ghcr-tags.sh` (jbsky/hardened-ci) for GHCR), called as a job from `build-push.yml` after
 every push (matrixed over all three images), and directly `workflow_dispatch`-able.
 Keeps the last 3 semver tags + `:latest` per image, deletes older semver tags. Only
 ever deletes a package version by its own named tag -- untagged manifest-list
