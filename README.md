@@ -28,7 +28,7 @@ inaccessible. **En production, epinglez le tag qui porte le compteur.**
 |-------|---------------|-------------------------|
 | `jbsky/squid-hardened` | `7.7` | `7.7.12` |
 | `jbsky/c-icap-hardened` | `0.6.5` | `0.6.5.27` |
-| `jbsky/clamav-hardened` | `1.5.4` | `1.5.4.13` |
+| `jbsky/clamav-hardened` | `1.5.4` | `1.5.4.14` |
 <!-- END:tags -->
 
 Ce tableau, les versions citees dans le texte et les tags qui apparaissent
