@@ -168,7 +168,7 @@ jobs:
       # chaque docker/build-push-action du job doit les recevoir.
       - name: Build-args depuis versions.json
         id: build-args
-        uses: jbsky/hardened-ci/versions@37f84a73b14b4da3f00004f94977d5f2f35d2635 # v0.8.0
+        uses: jbsky/hardened-ci/versions@9ca47b8942dd2ba041644dd345bbdb34a26ef6d0 # v0.9.0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -475,7 +475,7 @@ jobs:
       # hardened-ci a la ref epinglee, plus aucune copie dans ce depot.
       - name: Scripts partages de hardened-ci
         id: hci
-        uses: jbsky/hardened-ci/tools@37f84a73b14b4da3f00004f94977d5f2f35d2635 # v0.8.0
+        uses: jbsky/hardened-ci/tools@9ca47b8942dd2ba041644dd345bbdb34a26ef6d0 # v0.9.0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -616,6 +616,15 @@ jobs:
           "${{ steps.hci.outputs.dir }}/image-manifest.py" --check docker.io/jbsky/c-icap-hardened:latest -m c-icap/image.manifest
           "${{ steps.hci.outputs.dir }}/image-manifest.py" --check docker.io/jbsky/clamav-hardened:latest -m clamav/image.manifest
 
+      # Ce que l'image embarque, lisible dans le resume du job (hardened-ci
+      # v0.9.0) : rendu du manifeste, que --check vient de prouver conforme.
+      - name: Image inventory (job summary)
+        run: |
+          set -euo pipefail
+          "${{ steps.hci.outputs.dir }}/image-manifest.py" --report -m squid/image.manifest --name "squid-hardened" >> "$GITHUB_STEP_SUMMARY"
+          "${{ steps.hci.outputs.dir }}/image-manifest.py" --report -m c-icap/image.manifest --name "c-icap-hardened" >> "$GITHUB_STEP_SUMMARY"
+          "${{ steps.hci.outputs.dir }}/image-manifest.py" --report -m clamav/image.manifest --name "clamav-hardened" >> "$GITHUB_STEP_SUMMARY"
+
       # `lddtree` signale une dependance introuvable sur stderr et sort quand
       # meme en 0 : un build peut donc publier une image `FROM scratch` a
       # laquelle il manque une bibliotheque, l'erreur ne sortant qu'au
@@ -743,7 +752,7 @@ jobs:
       # chaque docker/build-push-action du job doit les recevoir.
       - name: Build-args depuis versions.json
         id: build-args
-        uses: jbsky/hardened-ci/versions@37f84a73b14b4da3f00004f94977d5f2f35d2635 # v0.8.0
+        uses: jbsky/hardened-ci/versions@9ca47b8942dd2ba041644dd345bbdb34a26ef6d0 # v0.9.0
 
       # linux/amd64 is built and pushed by digest in `build`, then
       # functionally tested in `test` (guarantees the exact tested digest
@@ -857,7 +866,7 @@ jobs:
       # hardened-ci a la ref epinglee, plus aucune copie dans ce depot.
       - name: Scripts partages de hardened-ci
         id: hci
-        uses: jbsky/hardened-ci/tools@37f84a73b14b4da3f00004f94977d5f2f35d2635 # v0.8.0
+        uses: jbsky/hardened-ci/tools@9ca47b8942dd2ba041644dd345bbdb34a26ef6d0 # v0.9.0
 
       - name: Download digests
         uses: actions/download-artifact@v8
@@ -1080,7 +1089,7 @@ jobs:
       # hardened-ci a la ref epinglee, plus aucune copie dans ce depot.
       - name: Scripts partages de hardened-ci
         id: hci
-        uses: jbsky/hardened-ci/tools@37f84a73b14b4da3f00004f94977d5f2f35d2635 # v0.8.0
+        uses: jbsky/hardened-ci/tools@9ca47b8942dd2ba041644dd345bbdb34a26ef6d0 # v0.9.0
 
       # Rewrite + commit in ONE step. They used to be two, and the retry loop
       # recovered from a lost race with `git pull --rebase || true`: both sides
@@ -1139,7 +1148,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    uses: jbsky/hardened-ci/.github/workflows/registry-cleanup.yml@37f84a73b14b4da3f00004f94977d5f2f35d2635 # v0.8.0
+    uses: jbsky/hardened-ci/.github/workflows/registry-cleanup.yml@9ca47b8942dd2ba041644dd345bbdb34a26ef6d0 # v0.9.0
     with:
       images: '["squid-hardened","c-icap-hardened","clamav-hardened"]'
     # Explicites : `secrets: inherit` n'est pas garanti entre depots d'un
