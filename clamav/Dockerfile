@@ -17,7 +17,7 @@
 ARG CLAMAV_VERSION
 
 # ---------- Stage 1 : builder ----------------------------------------
-FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS builder
+FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS builder
 
 ARG CLAMAV_VERSION
 SHELL ["/bin/ash", "-eo", "pipefail", "-c"]
@@ -160,7 +160,7 @@ COPY go.mod init.go ./
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags='-s -w' -o /init .
 
 # ---------- Stage 3 : prep (runtime filesystem) ---------------------
-FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS prep
+FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS prep
 
 SHELL ["/bin/ash", "-eo", "pipefail", "-c"]
 
