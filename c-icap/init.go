@@ -22,6 +22,9 @@ import (
 const (
 	cicapUID = 4100
 	cicapGID = 4100
+
+	defaultConf    = "/etc/c-icap/c-icap.conf"
+	defaultPidFile = "/run/c-icap/c-icap.pid"
 )
 
 func main() {
@@ -107,6 +110,21 @@ func entrypoint() error {
 	port := env("CLAMD_PORT", "3310")
 	addr := net.JoinHostPort(host, port)
 
+	// Un PidFile laisse par le conteneur precedent bloque c-icap : il lit le
+	// pid, trouve un processus vivant de ce numero dans le NOUVEL espace de
+	// pids et sort sur « c-icap server already running! ». Ca arrive des que
+	// /run/c-icap est un volume (VyOS 2026.10 : le tmpfs y arrive en root
+	// 0755, cf. vyos-deploy) ou apres un arret brutal. Dans un conteneur qui
+	// demarre, aucun autre c-icap ne partage cet espace de pids : le fichier
+	// est forcement perime. Seulement si init est le processus principal
+	// (parent = tini, PID 1) : un `podman exec` ne doit jamais retirer le pid
+	// de l'instance en service.
+	if os.Getppid() == 1 {
+		if err := removeStalePID(pidFile(confPath(os.Args[1:]))); err != nil {
+			return err
+		}
+	}
+
 	fmt.Printf("[init] Attente de clamd (%s)...\n", addr)
 
 	for i := 0; i < 120; i++ {
@@ -120,6 +138,54 @@ func entrypoint() error {
 	}
 
 	return fmt.Errorf("clamd injoignable après 120s (%s)", addr)
+}
+
+// ---------------------------------------------------------------------------
+// PidFile
+// ---------------------------------------------------------------------------
+
+// confPath rend la configuration passee par -f, sinon celle par defaut.
+func confPath(args []string) string {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "-f" {
+			return args[i+1]
+		}
+	}
+	return defaultConf
+}
+
+// pidFile lit la directive PidFile de la configuration (celle de la prod est
+// montee sur /etc/c-icap) ; a defaut, le chemin par defaut de l'image.
+func pidFile(conf string) string {
+	f, err := os.Open(conf)
+	if err != nil {
+		return defaultPidFile
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		fields := strings.Fields(sc.Text())
+		if len(fields) >= 2 && fields[0] == "PidFile" {
+			return fields[1]
+		}
+	}
+	return defaultPidFile
+}
+
+// removeStalePID retire le PidFile s'il existe ; son absence n'est pas une
+// erreur. Echec = sortie avec la cause, plutot qu'un « already running »
+// trompeur de c-icap.
+func removeStalePID(path string) error {
+	err := os.Remove(path)
+	switch {
+	case err == nil:
+		fmt.Printf("[init] PidFile du conteneur precedent retire : %s\n", path)
+		return nil
+	case os.IsNotExist(err):
+		return nil
+	default:
+		return fmt.Errorf("PidFile perime %s impossible a retirer: %w", path, err)
+	}
 }
 
 // ---------------------------------------------------------------------------
