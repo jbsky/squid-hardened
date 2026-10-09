@@ -168,7 +168,7 @@ jobs:
       # chaque docker/build-push-action du job doit les recevoir.
       - name: Build-args depuis versions.json
         id: build-args
-        uses: jbsky/hardened-ci/versions@9ca47b8942dd2ba041644dd345bbdb34a26ef6d0 # v0.9.0
+        uses: jbsky/hardened-ci/versions@aec6950c16450b3af197516e433fb067c7036dd7 # v1.1.0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -475,7 +475,7 @@ jobs:
       # hardened-ci a la ref epinglee, plus aucune copie dans ce depot.
       - name: Scripts partages de hardened-ci
         id: hci
-        uses: jbsky/hardened-ci/tools@9ca47b8942dd2ba041644dd345bbdb34a26ef6d0 # v0.9.0
+        uses: jbsky/hardened-ci/tools@aec6950c16450b3af197516e433fb067c7036dd7 # v1.1.0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -752,7 +752,7 @@ jobs:
       # chaque docker/build-push-action du job doit les recevoir.
       - name: Build-args depuis versions.json
         id: build-args
-        uses: jbsky/hardened-ci/versions@9ca47b8942dd2ba041644dd345bbdb34a26ef6d0 # v0.9.0
+        uses: jbsky/hardened-ci/versions@aec6950c16450b3af197516e433fb067c7036dd7 # v1.1.0
 
       # linux/amd64 is built and pushed by digest in `build`, then
       # functionally tested in `test` (guarantees the exact tested digest
@@ -866,7 +866,7 @@ jobs:
       # hardened-ci a la ref epinglee, plus aucune copie dans ce depot.
       - name: Scripts partages de hardened-ci
         id: hci
-        uses: jbsky/hardened-ci/tools@9ca47b8942dd2ba041644dd345bbdb34a26ef6d0 # v0.9.0
+        uses: jbsky/hardened-ci/tools@aec6950c16450b3af197516e433fb067c7036dd7 # v1.1.0
 
       - name: Download digests
         uses: actions/download-artifact@v8
@@ -996,11 +996,32 @@ jobs:
         with:
           name: sbom-prep-${{ matrix.image.name }}
 
+      # init (Go statique) est copie de gobuilder dans le stage final, sans
+      # passer par prep : la SBOM prep ne le voyait pas et cve-watch etait
+      # aveugle aux CVE de la stdlib Go (2026-10-09). Les binaires Go de
+      # l'image publiee y sont ajoutes (hardened-ci sbom-add-gobinaries.sh).
+      - name: SBOM of the published image (Go binaries)
+        if: steps.published.outputs.published == 'false'
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}@${{ steps.manifest.outputs.digest }}
+          format: cyclonedx
+          output: sbom-final-${{ matrix.image.name }}.cdx.json
+
+      - name: Add Go binaries to the prep SBOM
+        if: steps.published.outputs.published == 'false'
+        run: |
+          set -euo pipefail
+          "${{ steps.hci.outputs.dir }}/sbom-add-gobinaries.sh" \
+            "sbom-prep-${{ matrix.image.name }}.cdx.json" "sbom-final-${{ matrix.image.name }}.cdx.json" \
+            > "sbom-${{ matrix.image.name }}.cdx.json"
+          echo "SBOM : $(jq '.components | length' "sbom-prep-${{ matrix.image.name }}.cdx.json") composants prep -> $(jq '.components | length' "sbom-${{ matrix.image.name }}.cdx.json") avec les binaires Go"
+
       - name: Attest prep SBOM (CycloneDX)
         if: steps.published.outputs.published == 'false'
         run: |
           set -euo pipefail
-          cosign attest --yes --type cyclonedx --predicate "sbom-prep-${{ matrix.image.name }}.cdx.json" \
+          cosign attest --yes --type cyclonedx --predicate "sbom-${{ matrix.image.name }}.cdx.json" \
             "${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ matrix.image.name }}@${{ steps.manifest.outputs.digest }}"
 
       - name: Detect scan platform
@@ -1089,7 +1110,7 @@ jobs:
       # hardened-ci a la ref epinglee, plus aucune copie dans ce depot.
       - name: Scripts partages de hardened-ci
         id: hci
-        uses: jbsky/hardened-ci/tools@9ca47b8942dd2ba041644dd345bbdb34a26ef6d0 # v0.9.0
+        uses: jbsky/hardened-ci/tools@aec6950c16450b3af197516e433fb067c7036dd7 # v1.1.0
 
       # Rewrite + commit in ONE step. They used to be two, and the retry loop
       # recovered from a lost race with `git pull --rebase || true`: both sides
@@ -1148,7 +1169,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    uses: jbsky/hardened-ci/.github/workflows/registry-cleanup.yml@9ca47b8942dd2ba041644dd345bbdb34a26ef6d0 # v0.9.0
+    uses: jbsky/hardened-ci/.github/workflows/registry-cleanup.yml@aec6950c16450b3af197516e433fb067c7036dd7 # v1.1.0
     with:
       images: '["squid-hardened","c-icap-hardened","clamav-hardened"]'
     # Explicites : `secrets: inherit` n'est pas garanti entre depots d'un
