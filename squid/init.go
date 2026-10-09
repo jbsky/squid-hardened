@@ -110,6 +110,10 @@ func chownRecursive(path string, uid, gid int) error {
 const (
 	squidUID = 3128
 	squidGID = 3128
+
+	// Chemin compile dans squid quand la configuration ne dit rien
+	// (« FATAL: failed to open /run/squid.pid », 2026-10-09).
+	defaultPidFile = "/run/squid.pid"
 )
 
 func main() {
@@ -252,15 +256,70 @@ func entrypoint() error {
 		_ = run("squid", "-N", "-z", "-f", conf) // best-effort
 	}
 
-	// 3) Parse-check
+	// 3) PID file left by the previous container. Squid locks it, but after
+	// an abrupt stop (SIGKILL at the end of `podman stop`, crash, reboot) the
+	// stale number is very often alive again in the NEW pid namespace (squid
+	// lands on the same PID) and squid exits on « Squid is already running:
+	// Found fresh instance PID file ». Happens as soon as /run is a volume --
+	// the case on VyOS 2026.10, where a tmpfs arrives root 0755 (2026-10-09:
+	// proxy down 2 h 27). No other squid shares a starting container's pid
+	// namespace: the file is necessarily stale. Only when init is the main
+	// process (parent = tini, PID 1): a `podman exec` must never remove the
+	// pid of the running instance.
+	if os.Getppid() == 1 {
+		if err := removeStalePID(pidFile(confStr)); err != nil {
+			return err
+		}
+	}
+
+	// 4) Parse-check
 	log("Parse-check de la configuration...")
 	if err := run("squid", "-k", "parse", "-f", conf); err != nil {
 		return fmt.Errorf("squid -k parse: %w", err)
 	}
 
-	// 4) Exec
+	// 5) Exec
 	log("Démarrage de Squid")
 	return execCmd(os.Args[1:])
+}
+
+// ---------------------------------------------------------------------------
+// PID file
+// ---------------------------------------------------------------------------
+
+// pidFile rend le pid_filename de la configuration (la derniere directive
+// l'emporte, comme dans squid), "" pour « none », sinon le chemin compile.
+func pidFile(conf string) string {
+	path := defaultPidFile
+	for _, line := range strings.Split(conf, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[0] == "pid_filename" {
+			path = fields[1]
+		}
+	}
+	if path == "none" {
+		return ""
+	}
+	return path
+}
+
+// removeStalePID retire le fichier pid s'il existe ; son absence n'est pas
+// une erreur. Echec = sortie avec la cause, plutot qu'un « already running »
+// trompeur de squid.
+func removeStalePID(path string) error {
+	if path == "" {
+		return nil
+	}
+	err := os.Remove(path)
+	switch {
+	case err == nil:
+		log("Fichier pid du conteneur precedent retire : %s", path)
+		return nil
+	case os.IsNotExist(err):
+		return nil
+	default:
+		return fmt.Errorf("fichier pid perime %s impossible a retirer: %w", path, err)
+	}
 }
 
 // ---------------------------------------------------------------------------
