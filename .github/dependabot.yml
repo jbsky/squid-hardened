@@ -27,9 +27,11 @@ updates:
   # Image Docker Squid
   - package-ecosystem: "docker"
     directory: "/squid"
+    # Quotidien : un digest de base corrige une CVE (Go dans init, Python,
+    # Alpine) ; en hebdomadaire le correctif attendait jusqu'au lundi
+    # (CVE-2026-78667, 2026-10-09).
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "daily"
     labels: ["dependencies", "docker", "squid"]
     commit-message:
       prefix: "build(squid)"
@@ -37,9 +39,11 @@ updates:
   # Image Docker c-icap
   - package-ecosystem: "docker"
     directory: "/c-icap"
+    # Quotidien : un digest de base corrige une CVE (Go dans init, Python,
+    # Alpine) ; en hebdomadaire le correctif attendait jusqu'au lundi
+    # (CVE-2026-78667, 2026-10-09).
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "daily"
     labels: ["dependencies", "docker", "c-icap"]
     commit-message:
       prefix: "build(c-icap)"
@@ -47,9 +51,11 @@ updates:
   # Image Docker clamav
   - package-ecosystem: "docker"
     directory: "/clamav"
+    # Quotidien : un digest de base corrige une CVE (Go dans init, Python,
+    # Alpine) ; en hebdomadaire le correctif attendait jusqu'au lundi
+    # (CVE-2026-78667, 2026-10-09).
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "daily"
     labels: ["dependencies", "docker", "clamav"]
     commit-message:
       prefix: "build(clamav)"
