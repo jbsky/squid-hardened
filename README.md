@@ -98,11 +98,23 @@ stack-squid/
 │   ├── vyos-howto.md
 │   ├── ca-deployment.md
 │   └── ci-secrets.md
+├── .github/hardened-ci.json      # Ce qui distingue ce depot (3 images)
 └── .github/workflows/
-    ├── build-push.yml            # Build + sign + scan + release
-    ├── version-check.yml         # Detection versions upstream
-    └── security-audit.yml        # Weekly Trivy + Grype + cosign
+    ├── build-push.yml            # Appel du gabarit jbsky/hardened-ci
+    ├── base-watch.yml            # Digest des images de base (quotidien)
+    ├── cve-watch.yml             # Re-audit des SBOM attestees (quotidien)
+    ├── registry-cleanup.yml      # Purge des tags immuables
+    ├── version-check.yml         # Detection versions upstream (local)
+    └── security-audit.yml        # Appel du gabarit (hebdomadaire)
 ```
+
+Le pipeline lui-meme (lint, build des trois images, test EICAR qui les
+traverse, garde de revision par image, promotion signee, SBOM attestee,
+README, purge, release) vient de **`jbsky/hardened-ci`**, comme pour les sept
+autres depots du parc : les trois images sont **un seul appel**, parce que le
+test EICAR les eprouve ensemble et qu'aucune ne doit etre promue si la chaine
+Squid -> c-icap -> ClamAV echoue. Ce depot ne decrit que ce qui le distingue,
+dans `.github/hardened-ci.json`.
 
 ## Pré-requis
 
