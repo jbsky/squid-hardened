@@ -1,0 +1,56 @@
+{
+  "platforms": ["linux/amd64"],
+  "setup": "./scripts/generate-ca.sh",
+  "compose_profile": "explicit",
+  "smoke": "./scripts/test-eicar.sh",
+  "images": [
+    {
+      "key": "squid",
+      "image": "squid-hardened",
+      "dockerfile": "squid/Dockerfile",
+      "compose_service": "squid-explicit",
+      "version": {"key": "squid"},
+      "revision": ["squid", "squid/", "versions.json"],
+      "probes": [
+        {
+          "label": "Squid",
+          "want": "version",
+          "cmd": "docker exec squid-explicit squid -v",
+          "regex": "Version \\K[0-9][0-9.]*"
+        }
+      ]
+    },
+    {
+      "key": "c-icap",
+      "image": "c-icap-hardened",
+      "dockerfile": "c-icap/Dockerfile",
+      "compose_service": "c-icap",
+      "version": {"key": "c-icap"},
+      "revision": ["c-icap", "c-icap/", "versions.json"],
+      "probes": [
+        {
+          "label": "c-icap",
+          "want": "version",
+          "cmd": "docker exec c-icap c-icap -V",
+          "regex": "^[0-9][0-9.]*"
+        }
+      ]
+    },
+    {
+      "key": "clamav",
+      "image": "clamav-hardened",
+      "dockerfile": "clamav/Dockerfile",
+      "compose_service": "clamav",
+      "version": {"key": "clamav"},
+      "revision": ["clamav", "clamav/", "versions.json"],
+      "probes": [
+        {
+          "label": "ClamAV",
+          "want": "version",
+          "cmd": "docker exec clamav clamd --version",
+          "regex": "ClamAV \\K[0-9][0-9.]*"
+        }
+      ]
+    }
+  ]
+}
