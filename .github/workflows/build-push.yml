@@ -168,7 +168,7 @@ jobs:
       # chaque docker/build-push-action du job doit les recevoir.
       - name: Build-args depuis versions.json
         id: build-args
-        uses: jbsky/hardened-ci/versions@aec6950c16450b3af197516e433fb067c7036dd7 # v1.1.0
+        uses: jbsky/hardened-ci/versions@20dbd2ae1f65f1d72d88ec7a3c78ed716ba2009e # v1.2.0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -475,7 +475,7 @@ jobs:
       # hardened-ci a la ref epinglee, plus aucune copie dans ce depot.
       - name: Scripts partages de hardened-ci
         id: hci
-        uses: jbsky/hardened-ci/tools@aec6950c16450b3af197516e433fb067c7036dd7 # v1.1.0
+        uses: jbsky/hardened-ci/tools@20dbd2ae1f65f1d72d88ec7a3c78ed716ba2009e # v1.2.0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -752,7 +752,7 @@ jobs:
       # chaque docker/build-push-action du job doit les recevoir.
       - name: Build-args depuis versions.json
         id: build-args
-        uses: jbsky/hardened-ci/versions@aec6950c16450b3af197516e433fb067c7036dd7 # v1.1.0
+        uses: jbsky/hardened-ci/versions@20dbd2ae1f65f1d72d88ec7a3c78ed716ba2009e # v1.2.0
 
       # linux/amd64 is built and pushed by digest in `build`, then
       # functionally tested in `test` (guarantees the exact tested digest
@@ -866,7 +866,7 @@ jobs:
       # hardened-ci a la ref epinglee, plus aucune copie dans ce depot.
       - name: Scripts partages de hardened-ci
         id: hci
-        uses: jbsky/hardened-ci/tools@aec6950c16450b3af197516e433fb067c7036dd7 # v1.1.0
+        uses: jbsky/hardened-ci/tools@20dbd2ae1f65f1d72d88ec7a3c78ed716ba2009e # v1.2.0
 
       - name: Download digests
         uses: actions/download-artifact@v8
@@ -1110,7 +1110,7 @@ jobs:
       # hardened-ci a la ref epinglee, plus aucune copie dans ce depot.
       - name: Scripts partages de hardened-ci
         id: hci
-        uses: jbsky/hardened-ci/tools@aec6950c16450b3af197516e433fb067c7036dd7 # v1.1.0
+        uses: jbsky/hardened-ci/tools@20dbd2ae1f65f1d72d88ec7a3c78ed716ba2009e # v1.2.0
 
       # Rewrite + commit in ONE step. They used to be two, and the retry loop
       # recovered from a lost race with `git pull --rebase || true`: both sides
@@ -1169,7 +1169,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    uses: jbsky/hardened-ci/.github/workflows/registry-cleanup.yml@aec6950c16450b3af197516e433fb067c7036dd7 # v1.1.0
+    uses: jbsky/hardened-ci/.github/workflows/registry-cleanup.yml@20dbd2ae1f65f1d72d88ec7a3c78ed716ba2009e # v1.2.0
     with:
       images: '["squid-hardened","c-icap-hardened","clamav-hardened"]'
     # Explicites : `secrets: inherit` n'est pas garanti entre depots d'un
