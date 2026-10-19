@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   prune:
-    uses: jbsky/hardened-ci/.github/workflows/registry-cleanup.yml@265f8c00af5dfacd5a05d261aa2695b1be6fc1c4 # v1.3.0
+    uses: jbsky/hardened-ci/.github/workflows/registry-cleanup.yml@c0be9ec717d12aa6776ec79ab9e29c4c1979a59b # v1.4.3
     with:
       images: '["squid-hardened","c-icap-hardened","clamav-hardened"]'
     secrets:
