@@ -241,3 +241,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 
 ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/init"]
 CMD ["c-icap", "-N", "-D", "-f", "/etc/c-icap/c-icap.conf"]
+# cve-rebuild 2026-10-26 CVE-2026-92392 -- paquets Alpine corriges, pris par apk upgrade du stage prep (cve-watch run 40314968721)
