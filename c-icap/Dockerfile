@@ -10,7 +10,7 @@
 # --check compare ce tag a .alpine.
 
 # ---------- Stage 1 : builder ----------------------------------------
-FROM alpine:3.24@sha256:3f4d6b32e26703c6082839234f43769d5046b3ac7c910033911d1e71d8cd630a AS builder
+FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS builder
 
 ARG C_ICAP_VERSION
 ARG C_ICAP_SHA256
@@ -107,7 +107,7 @@ COPY go.mod init.go ./
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags='-s -w' -o /init .
 
 # ---------- Stage 3 : prep (assemble runtime filesystem) ------------
-FROM alpine:3.24@sha256:3f4d6b32e26703c6082839234f43769d5046b3ac7c910033911d1e71d8cd630a AS prep
+FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS prep
 
 # -- Runtime APK installs split to stay within proxy 240s timeout --
 
