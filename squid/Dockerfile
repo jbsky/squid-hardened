@@ -297,3 +297,4 @@ ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/init"]
 # pour un diagnostic sort aussi sur la console (il serait tronque au
 # niveau de "-d" sinon).
 CMD ["squid", "-N", "-f", "/etc/squid/squid.conf"]
+# cve-rebuild 2026-11-11 CVE-2026-107364, CVE-2026-112315, CVE-2026-112316, CVE-2026-112317, CVE-2026-112318, CVE-2026-112319 (+10) -- paquets Alpine corriges, pris par apk upgrade du stage prep (cve-watch run 43024307054)
