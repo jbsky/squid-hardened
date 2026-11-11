@@ -26,7 +26,7 @@ inaccessible. **En production, epinglez le tag qui porte le compteur.**
 <!-- BEGIN:tags (genere par la CI -- ne pas editer a la main) -->
 | Image | Version amont | Tag immuable a epingler |
 |-------|---------------|-------------------------|
-| `jbsky/squid-hardened` | `7.8` | `7.8.2` |
+| `jbsky/squid-hardened` | `7.8` | `7.8.3` |
 | `jbsky/c-icap-hardened` | `0.6.5` | `0.6.5.39` |
 | `jbsky/clamav-hardened` | `1.5.4` | `1.5.4.24` |
 <!-- END:tags -->
