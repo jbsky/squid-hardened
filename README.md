@@ -1,27 +1,70 @@
-# Stack Squid + C-ICAP + ClamAV hardenee pour VyOS
+# Squid + c-icap + ClamAV Hardened
 
 [![Build](https://github.com/jbsky/squid-hardened/actions/workflows/build-push.yml/badge.svg)](https://github.com/jbsky/squid-hardened/actions/workflows/build-push.yml)
 [![Docker Hub squid](https://img.shields.io/docker/v/jbsky/squid-hardened?sort=semver&label=squid)](https://hub.docker.com/r/jbsky/squid-hardened)
 [![Docker Hub c-icap](https://img.shields.io/docker/v/jbsky/c-icap-hardened?sort=semver&label=c-icap)](https://hub.docker.com/r/jbsky/c-icap-hardened)
 [![Docker Hub clamav](https://img.shields.io/docker/v/jbsky/clamav-hardened?sort=semver&label=clamav)](https://hub.docker.com/r/jbsky/clamav-hardened)
-[![Hardening](https://img.shields.io/badge/hardening-platine-blueviolet)](https://github.com/jbsky/squid-hardened#security--verification)
+[![Hardening](https://img.shields.io/badge/hardening-platine-blueviolet)](https://github.com/jbsky/squid-hardened#hardening)
 
-Stack proxy filtrant antiviral, conteneurisee en **Docker Hardened Image** (FROM scratch, Go static init, tini PID 1, non-root, RELRO/PIE/SSP/FORTIFY, zero shell), prete a remplacer un proxy Squid existant.
+A filtering, antivirus web proxy stack in three `FROM scratch` images -- Squid
+<!--v:squid-hardened-->7.8<!--/v-->, c-icap <!--v:c-icap-hardened-->0.6.5<!--/v--> with squidclamav, and ClamAV
+<!--v:clamav-hardened-->1.5.4<!--/v--> -- all built from source, ready to replace an existing Squid
+behind VyOS.
 
-Deux modes opérationnels :
+Two operating modes:
 
-| Mode | Réseau | Port | Caractéristiques |
+| Mode | Network | Port | Characteristics |
 |---|---|---|---|
-| **Transparent** | LAN 1 | 3128 (intercept) | DNAT depuis VyOS, HTTP scanné, HTTPS pass-through |
-| **Explicite + SSL Bump** | LAN 2 | 3128 / 3129 (bump) | WPAD via DHCP option 252, HTTPS déchiffré et scanné |
+| **Transparent** | LAN 1 | 3128 (intercept) | DNAT from VyOS, HTTP scanned, HTTPS passed through |
+| **Explicit + SSL Bump** | LAN 2 | 3128 / 3129 (bump) | WPAD through DHCP option 252, HTTPS decrypted and scanned |
+
+## What is built
+
+- **Squid**: release tarball verified against the squid-cache PGP key
+  ([`squid/squid-cache.pgp.asc`](squid/squid-cache.pgp.asc)), built with
+  OpenSSL, the SSL Bump certificate generator (`--enable-ssl-crtd`) and the
+  ICAP client. Configurations for both modes and for VyOS production live in
+  [`squid/`](squid).
+- **c-icap and squidclamav**: release tarballs verified against their sha256,
+  pinned in [`versions.json`](versions.json).
+- **ClamAV**: Cisco Talos release tarball, verified against its signature
+  ([`clamav/clamav-talos.gpg.asc`](clamav/clamav-talos.gpg.asc)). Its
+  configuration ([`clamav/conf/`](clamav/conf)) is mounted on `/etc/clamav`,
+  as in the deployment.
+
+The three images are **one pipeline call** of
+[hardened-ci](https://github.com/jbsky/hardened-ci), not three: the EICAR test
+exercises them together, and none is promoted if the Squid -> c-icap -> ClamAV
+chain fails. This repository only describes what sets it apart, in
+[`.github/hardened-ci.json`](.github/hardened-ci.json).
+
+## Hardening
+
+Tier **platine** (OCI label `security.hardening.tier`): a `FROM scratch` image
+with no shell and no package manager, a non-root user, a static Go init behind
+`tini` as PID 1, and binaries built with hardening flags.
+
+| Measure | Squid | c-icap | ClamAV |
+|---|---|---|---|
+| Multi-stage build, final image `FROM scratch` | yes | yes | yes |
+| Non-root user | uid 3128 | uid 4100 | uid 4000 |
+| `cap_drop: ALL` (compose) | yes, plus `NET_BIND_SERVICE` | yes | yes |
+| `no-new-privileges` (compose) | yes | yes | yes |
+| Stripped, full RELRO, PIE | yes | yes | yes |
+| `tini` as PID 1, Go init healthcheck | yes | yes | yes |
+| Read-only rootfs (compose) | no (Squid writes its cache spool) | yes | yes |
+| OCI labels | yes | yes | yes |
+
+Details in [`docs/hardening.md`](docs/hardening.md).
 
 ## Tags
 
-Trois tags par image : `latest` (dernier build de `main`), la version amont
-seule, et la version amont suffixee d'un **compteur de revision**. Les deux
-premiers sont **reecrits en place** a chaque rebuild -- bump Alpine, correctif
-CVE, changement de config -- et le build qu'ils designaient devient alors
-inaccessible. **En production, epinglez le tag qui porte le compteur.**
+Every image is published under three tags: `latest` (last build of `main`),
+the upstream version alone, and the upstream version followed by a **revision
+counter**. The first two are **overwritten in place** on every rebuild (Alpine
+update, CVE fix, configuration change), and the build they pointed to can no
+longer be pulled by them. **In production, pin the tag that carries the
+counter.**
 
 <!-- BEGIN:tags (genere par la CI -- ne pas editer a la main) -->
 | Image | Version amont | Tag immuable a epingler |
@@ -31,266 +74,204 @@ inaccessible. **En production, epinglez le tag qui porte le compteur.**
 | `jbsky/clamav-hardened` | `1.5.4` | `1.5.4.26` |
 <!-- END:tags -->
 
-Ce tableau, les versions citees dans le texte et les tags qui apparaissent
-dans les exemples sont tous rendus par `update-readme-tags.sh` (jbsky/hardened-ci) apres
-chaque publication -- ne rien editer a la main.
+This table, the versions quoted in the text and the tags in the examples are
+rendered by `update-readme-tags.sh` ([hardened-ci](https://github.com/jbsky/hardened-ci))
+after each publication: do not edit them by hand.
 
-Le compteur compte les commits qui touchent les inputs de l'image (`squid/`, `c-icap/` ou `clamav/`, plus `versions.json`)
-depuis le dernier changement de version amont, et repart a `0` a chaque nouvelle
-version amont. Un commit qui ne touche que `.github/` ne l'incremente pas.
+The counter counts the commits that touch the image inputs (the `revision`
+list of each image in [`.github/hardened-ci.json`](.github/hardened-ci.json):
+its own directory plus `versions.json`) since the last upstream version
+change, and restarts at `0` with each new upstream version. A commit that only
+touches `.github/` does not increment it. Each image has its own counter,
+independent of the other two. Squid's upstream version has two components, so
+its immutable tag has three.
 
-Chaque image a son propre compteur, independant des deux autres. Squid ayant
-une version amont a deux chiffres, son tag immuable en porte trois.
+`docker.io` and `ghcr.io` publish the same tags with the same digest, for
+`linux/amd64`. Each registry keeps the last six immutable tags of an image, so
+that superseded builds do not stay pullable: move your pins forward.
 
-Les deux registres, `docker.io` et `ghcr.io`, publient les memes tags avec le
-meme digest.
+`version-check` looks for new Squid, c-icap, squidclamav and ClamAV releases
+every Monday, bumps `versions.json` on `main` and republishes.
 
-> ClamAV vient d'un `apk add clamav` non epingle : sa version suit ce que livre
-> Alpine. La CI verifie a chaque build que le binaire correspond au tag publie,
-> mais un bump Alpine peut la deplacer -- d'ou l'interet d'epingler un tag immuable.
+## Usage
 
-## Arborescence
+### Prerequisites
 
-```
-stack-squid/
-├── docker-compose.yml            # orchestrateur avec profils
-├── Makefile                      # raccourcis dev
-├── versions.json                 # versions trackees
-├── squid/                        # image Squid
-│   ├── Dockerfile                # Multi-stage (Alpine → FROM scratch)
-│   ├── go.mod + init.go          # Go static init binary
-│   ├── squid-explicit.conf       # config mode explicite + SSL Bump
-│   ├── squid-transparent.conf    # config mode intercept
-│   ├── squid-vyos.conf           # config VyOS production
-│   ├── squid.yaml                # Squid YAML config format
-│   ├── squid-cache.pgp.asc      # cle GPG embarquee
-│   ├── conf.d/nobump_domains.acl # domaines sans SSL Bump
-│   └── nobump_domains.acl        # ACL legacy
-├── clamav/                       # image ClamAV
-│   ├── Dockerfile                # Multi-stage 4 stages (compile source → FROM scratch)
-│   ├── clamav-talos.gpg.asc      # cle GPG Cisco Talos (verif du tarball)
-│   ├── go.mod + init.go          # Go static init binary
-│   └── conf/                     # monte sur /etc/clamav (forme du deploiement)
-│       ├── clamd.conf
-│       └── freshclam.conf
-├── c-icap/                       # image C-ICAP + squidclamav
-│   ├── Dockerfile
-│   ├── go.mod + init.go          # Go static init binary
-│   ├── c-icap.conf
-│   ├── c-icap.yaml
-│   └── squidclamav.conf
-├── vyos/                         # configs VyOS
-│   ├── vyos-transparent.config   # DNAT simple
-│   ├── vyos-explicit.config      # WPAD + SSL Bump
-│   ├── vyos-pbr-intercept.config # PBR + in-container REDIRECT
-│   ├── squid-redirect.service    # systemd unit (nft REDIRECT injection)
-│   └── wpad-example.dat
-├── scripts/
-│   ├── generate-ca.sh            # cree la CA SSL Bump
-│   ├── check-versions.sh         # detection versions upstream
-│   ├── deploy.sh                 # build / up / down / scan / sbom
-│   └── test-eicar.sh             # validation chaine ICAP
-├── docs/                         # documentation detaillee
-│   ├── vyos-transparent-proxy.md # guide interception PBR (EN)
-│   ├── vyos-transparent-proxy.fr.md # idem (FR)
-│   ├── architecture.md
-│   ├── hardening.md
-│   ├── vyos-howto.md
-│   ├── ca-deployment.md
-│   └── ci-secrets.md
-├── .github/hardened-ci.json      # Ce qui distingue ce depot (3 images)
-└── .github/workflows/
-    ├── build-push.yml            # Appel du gabarit jbsky/hardened-ci
-    ├── base-watch.yml            # Digest des images de base (quotidien)
-    ├── cve-watch.yml             # Re-audit des SBOM attestees (quotidien)
-    ├── registry-cleanup.yml      # Purge des tags immuables
-    ├── version-check.yml         # Detection versions upstream (local)
-    └── security-audit.yml        # Appel du gabarit (hebdomadaire)
-```
+- A Docker host (separate from VyOS recommended): Linux, Docker 24 or later,
+  Compose v2.
+- VyOS 1.4 (Sagitta) or 1.5 (Circinus) with the nftables firewall.
+- `openssl`, `curl` and `bash` on the Docker host.
+- Recommended audit tools: `trivy`, `syft`, `dive`.
+- Internet access, to build (Alpine, Squid, c-icap and ClamAV sources) and
+  for the ClamAV signatures.
 
-Le pipeline lui-meme (lint, build des trois images, test EICAR qui les
-traverse, garde de revision par image, promotion signee, SBOM attestee,
-README, purge, release) vient de **`jbsky/hardened-ci`**, comme pour les sept
-autres depots du parc : les trois images sont **un seul appel**, parce que le
-test EICAR les eprouve ensemble et qu'aucune ne doit etre promue si la chaine
-Squid -> c-icap -> ClamAV echoue. Ce depot ne decrit que ce qui le distingue,
-dans `.github/hardened-ci.json`.
-
-## Pré-requis
-
-- Hôte Docker (séparé de VyOS recommandé) : Linux + Docker ≥ 24, Compose v2
-- VyOS 1.4 (Sagitta) ou 1.5 (Circinus) avec firewall nftables
-- `openssl`, `curl`, `bash` sur l'hôte Docker
-- Outils audit recommandés : `trivy`, `syft`, `dive`
-- Accès Internet pour pull Alpine + sources Squid/c-icap + signatures ClamAV
-
-## Mise en route rapide
+### Quick start
 
 ```bash
-cd squid-stack
 cp .env.example .env
 
-# 1) Génération de la CA SSL Bump (mode explicite uniquement)
+# 1) SSL Bump CA (explicit mode only)
 ./scripts/generate-ca.sh
 
-# 2) Build des images hardenées
+# 2) Build the images
 ./scripts/deploy.sh build
 
-# 3) Démarrage selon le mode
-./scripts/deploy.sh up explicit     # HTTPS + SSL Bump
-# ou
-./scripts/deploy.sh up transparent  # HTTP transparent
-# ou
-./scripts/deploy.sh up all          # les deux en parallèle (ports différents)
+# 3) Start one profile -- each one publishes port 3128
+./scripts/deploy.sh up explicit      # HTTPS + SSL Bump
+./scripts/deploy.sh up transparent   # transparent HTTP
 
-# 4) Vérification
+# 4) Check the chain
 ./scripts/test-eicar.sh 127.0.0.1:3128
 
-# 5) Audit sécurité
+# 5) Security audit
 ./scripts/deploy.sh scan
 ./scripts/deploy.sh sbom
 ```
 
-## Application des configs VyOS
+The compose file also has a `multimode` profile, which runs the VyOS
+production configuration (`squid/squid-vyos.conf`).
 
-Les fichiers `vyos/*.config` sont en syntaxe `set` directement collable en mode `configure` :
+### VyOS configuration
+
+The `vyos/*.config` files use the `set` syntax, ready to paste in
+`configure` mode:
 
 ```vyos
 configure
 load /config/scripts/squid-stack/vyos-explicit.config
-# vérifier les variables (IP/interfaces) avant commit !
+# check the variables (IPs, interfaces) before committing!
 commit
 save
 exit
 ```
 
-Adapter impérativement les IP et interfaces (`eth0/1/2`, sous-réseaux) à votre topologie réelle.
+Adapt the IPs and interfaces (`eth0/1/2`, subnets) to your actual topology.
+Transparent HTTPS interception with policy-based routing is described in
+[`docs/vyos-transparent-proxy.md`](docs/vyos-transparent-proxy.md).
 
-## Bascule depuis le Squid existant
+### Switching over from an existing Squid
 
-1. Déployer la nouvelle stack sur un **autre IP** que l'ancien (192.168.99.10 par défaut)
-2. Tester depuis un client de test (curl + EICAR)
-3. Mettre à jour la règle DNAT VyOS (mode transparent) ou le WPAD (mode explicite) pour basculer
-4. Conserver l'ancien Squid en standby pendant 24-48h
-5. Décommissionner après validation des logs
+1. Deploy the new stack on **another IP** than the old one (192.168.99.10 by
+   default).
+2. Test from a test client (curl + EICAR).
+3. Update the VyOS DNAT rule (transparent mode) or the WPAD file (explicit
+   mode) to switch.
+4. Keep the old Squid on standby for 24-48 h.
+5. Decommission it once the logs are validated.
 
-## SSL Bump – Points critiques
+## SSL Bump
 
-- **La CA générée doit être installée sur tous les clients** du LAN explicite (GPO Windows, profil iOS/Android MDM, store système Linux, NSS pour Firefox)
-- Sites bancaires/santé : ajoutés à `nobump_domains.acl` (splice = pass-through)
-- Applications avec **certificate pinning** (Chrome, banques mobiles, MAJ système) doivent être whitelistées
-- **Conformité légale** : informer les utilisateurs (charte informatique, RGPD, code du travail)
-
-## Sécurité Docker Hardened Image – ce qui est appliqué
-
-| Mesure | Squid | C-ICAP | ClamAV |
-|---|---|---|---|
-| Multi-stage build | ✅ (4 stages) | ✅ (4 stages) | ✅ (4 stages) |
-| Base de l'image finale | `FROM scratch` | `FROM scratch` | `FROM scratch` |
-| Non-root user | uid 3128 | uid 4100 | uid 4000 |
-| `cap_drop: ALL` | ✅ | ✅ | ✅ |
-| `no-new-privileges` | ✅ | ✅ | ✅ |
-| Strip + RELRO + PIE | ✅ | ✅ | ✅ |
-| Tini PID 1 | ✅ | ✅ | ✅ |
-| Read-only friendly | ✅ (sauf cache) | ✅ | ✅ |
-| `tmpfs` /tmp,/run | ✅ | ✅ | ✅ |
-| Healthcheck | ✅ | ✅ | ✅ |
-| OCI labels | ✅ | ✅ | ✅ |
-| SBOM (via syft) | ✅ | ✅ | ✅ |
+- **The generated CA must be installed on every client** of the explicit LAN
+  (Windows GPO, iOS/Android MDM profile, Linux system store, NSS for Firefox):
+  see [`docs/ca-deployment.md`](docs/ca-deployment.md).
+- Banking and health sites are listed in `nobump_domains.acl` (splice =
+  pass-through).
+- Applications with **certificate pinning** (Chrome, mobile banking apps,
+  system updates) must be allow-listed.
+- **Legal compliance**: inform the users (IT charter, GDPR, labour law).
 
 ## Logs
 
-Squid n'écrit **aucun fichier de log** : les configs livrées pointent
-`access_log` sur `stdio:/dev/stdout` et `cache_log` sur `stdio:/dev/stderr`.
-L'image est `FROM scratch` — un fichier sous `/var/log/squid` finirait dans la
-couche overlay éphémère du conteneur : illisible (pas de shell pour l'ouvrir),
-sans rotation, et perdu à chaque recréation. La collecte est donc celle du
-runtime : `docker logs` / `podman logs`, ou journald → rsyslog → SIEM.
+Squid writes **no log file**: the shipped configurations send `access_log` to
+`stdio:/dev/stdout` and `cache_log` to `stdio:/dev/stderr`. The image is
+`FROM scratch` -- a file under `/var/log/squid` would end up in the
+container's ephemeral overlay layer: unreadable (no shell to open it), never
+rotated, and lost on every re-creation. Collection is therefore the runtime's:
+`docker logs` / `podman logs`, or journald -> rsyslog -> SIEM.
 
-> Le `CMD` de l'image n'utilise volontairement pas `-d <level>` : avec
-> `cache_log stdio:/dev/stderr`, l'option `-d` fait apparaître **chaque
-> message deux fois** sur stderr. Si vous surchargez le `CMD`, ne le
-> réintroduisez pas.
+> The image `CMD` deliberately does not use `-d <level>`: with
+> `cache_log stdio:/dev/stderr`, `-d` prints **every message twice** on
+> stderr. If you override the `CMD`, do not bring it back.
 
-Format Squid étendu (mode explicite) inclut :
-- SNI TLS (`%ssl::>sni`)
-- Mode bump utilisé (`%ssl::bump_mode`)
+The extended Squid format (explicit mode) includes the TLS SNI
+(`%ssl::>sni`) and the bump mode used (`%ssl::bump_mode`). For a SIEM, prefer
+a dedicated `access_log udp://<collector>:514` (commented example in
+`squid/squid-vyos.conf`) over a sidecar tailing a file.
 
-Pour un SIEM, préférer un `access_log udp://<collecteur>:514` dédié (exemple
-commenté dans `squid/squid-vyos.conf`) plutôt qu'un sidecar de tail de fichier.
+## Troubleshooting
 
-## Test EICAR
-
-Le fichier de test antivirus officiel EICAR (`https://secure.eicar.org/eicar.com.txt`) doit être bloqué.
-
-Voir `scripts/test-eicar.sh`.
-
-## Dépannage
-
-| Symptôme | Cause probable | Action |
+| Symptom | Likely cause | Action |
 |---|---|---|
-| `SECURITY ALERT: Host header forgery` | Conntrack manquant en intercept | `modprobe nf_conntrack`, vérifier que VyOS conntracke bien le DNAT |
-| Erreur SSL côté client | CA non installée | Pousser `certs/bump.crt` sur le client |
-| `clamd timeout` | DB pas téléchargée | `docker logs clamav` – le 1er freshclam prend 5-15 min |
-| Sites cassent en bump | Certificate pinning | Ajouter à `nobump_domains.acl` + reload Squid |
-| EICAR passe quand même | ICAP désactivé / clamd KO | Vérifier `icap_service_failure_limit` et logs c-icap |
+| `SECURITY ALERT: Host header forgery` | missing conntrack in intercept mode | `modprobe nf_conntrack`, check that VyOS tracks the DNAT |
+| SSL error on the client | CA not installed | push `certs/bump.crt` to the client |
+| `clamd timeout` | database not downloaded yet | `docker logs clamav` -- the first freshclam takes 5-15 min |
+| Sites break under bump | certificate pinning | add them to `nobump_domains.acl` + reload Squid |
+| EICAR still goes through | ICAP disabled / clamd down | check `icap_service_failure_limit` and the c-icap logs |
 
-## Documentation détaillée
+## Documentation
 
-Voir `docs/` pour :
-- `vyos-transparent-proxy.md` – interception HTTPS transparente avec PBR + conteneurs Podman ([EN](docs/vyos-transparent-proxy.md) / [FR](docs/vyos-transparent-proxy.fr.md))
-- `architecture.md` – schémas et flux
-- `hardening.md` – détail des mesures de durcissement
-- `vyos-howto.md` – guide pas-à-pas VyOS (mode DNAT simple)
-- `ca-deployment.md` – pousser la CA sur Windows/macOS/iOS/Android/Linux
+[`docs/`](docs), in French except for the transparent-proxy guide, which also
+exists in English:
 
-## Security & Verification
+- [`vyos-transparent-proxy.md`](docs/vyos-transparent-proxy.md) -- transparent
+  HTTPS interception with PBR and Podman containers
+  ([FR](docs/vyos-transparent-proxy.fr.md));
+- [`architecture.md`](docs/architecture.md) -- diagrams and flows;
+- [`hardening.md`](docs/hardening.md) -- hardening measures in detail;
+- [`vyos-howto.md`](docs/vyos-howto.md) -- step-by-step VyOS guide (simple
+  DNAT mode);
+- [`ca-deployment.md`](docs/ca-deployment.md) -- pushing the CA to
+  Windows/macOS/iOS/Android/Linux;
+- [`ci-secrets.md`](docs/ci-secrets.md) -- secrets the CI needs.
 
-All three images are signed with [cosign](https://github.com/sigstore/cosign) using keyless OIDC (Sigstore).
-
-### Verify image signatures
+## Build and test
 
 ```bash
-# From ghcr.io (signatures stored natively)
-for img in squid-hardened c-icap-hardened clamav-hardened; do
-  cosign verify \
-    --certificate-identity-regexp '^https://github.com/jbsky/stack-squid/' \
-    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-    ghcr.io/jbsky/$img:latest
-done
+make build   # build args come from versions.json
+make test    # scripts/test-eicar.sh: the EICAR file must be blocked
+make scan    # Trivy on the three images
+```
 
-# From Docker Hub (signatures stored in ghcr.io)
-for img in squid-hardened c-icap-hardened clamav-hardened; do
-  COSIGN_REPOSITORY=ghcr.io/jbsky/$img \
-    cosign verify \
-    --certificate-identity-regexp '^https://github.com/jbsky/stack-squid/' \
-    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-    docker.io/jbsky/$img:latest
+`scripts/test-eicar.sh` downloads the official EICAR test file through the
+proxy and requires it to be blocked: it proves the whole Squid -> c-icap ->
+ClamAV chain, not just three healthy containers.
+
+Versions live only in [`versions.json`](versions.json): the Dockerfiles have
+no defaults, `make build` and CI pass them through
+`scripts/versions-build-args.py`, and a bare `docker build` stops at the guard.
+
+## Verification
+
+Images are signed with [cosign](https://github.com/sigstore/cosign) (keyless,
+GitHub OIDC) by the shared [hardened-ci](https://github.com/jbsky/hardened-ci)
+pipeline. The certificate names that workflow and, in an extension, this
+repository: the commands below require both.
+
+```bash
+for ref in jbsky/squid-hardened:7.8.5 jbsky/c-icap-hardened:0.6.5.41 jbsky/clamav-hardened:1.5.4.26; do
+  # ghcr.io
+  cosign verify "ghcr.io/$ref" \
+    --certificate-identity-regexp '^https://github.com/(jbsky/squid-hardened|jbsky/hardened-ci)/' \
+    --certificate-github-workflow-repository jbsky/squid-hardened \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com
+  # Docker Hub (the signature is stored on ghcr.io)
+  COSIGN_REPOSITORY="ghcr.io/${ref%%:*}" cosign verify "docker.io/$ref" \
+    --certificate-identity-regexp '^https://github.com/(jbsky/squid-hardened|jbsky/hardened-ci)/' \
+    --certificate-github-workflow-repository jbsky/squid-hardened \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com
 done
 ```
 
-### Hardening tier "Platine" guarantees
+Each published digest also carries a CycloneDX SBOM (the `prep` stage the
+image is assembled from, plus its Go binaries), attested with cosign, and a
+GitHub SLSA build provenance attestation. The pipeline lints, builds the three
+images, scans their `prep` stages with Trivy, runs the EICAR test on the exact
+digests it is about to publish, then promotes and signs them. Base image
+digests follow upstream daily (`base-watch`), a fixable Alpine package CVE
+triggers a rebuild (`cve-watch`), and each published image is audited weekly
+(`security-audit`: Trivy, Grype, cosign). Audit status and documented
+exceptions: [`SECURITY.md`](SECURITY.md).
 
-| Property | Description |
-|----------|-------------|
-| FROM scratch | No base image, no shell, no package manager |
-| Go static init | Binary entrypoint + healthcheck (no script) |
-| tini PID 1 | Proper signal forwarding and zombie reaping |
-| Non-root | Runs as unprivileged UID |
-| Compiler hardening | RELRO, PIE, SSP, FORTIFY_SOURCE, stack-clash, NX |
-| Cosign signed | OIDC keyless signature via Sigstore transparency log |
-| SBOM | Software Bill of Materials embedded in manifest |
-| SLSA provenance | Build provenance attestation (level 2) |
+## License
 
-## Licence
+The contents of this repository (Dockerfiles, Go `init` programs, scripts and
+CI) are licensed under **Apache-2.0**, see [`LICENSE`](LICENSE). Copyright
+2026 jbsky.
 
-Le contenu de ce depot -- Dockerfiles, binaires `init` en Go, scripts et chaine
-CI -- est sous **Apache-2.0**, voir [`LICENSE`](LICENSE). Copyright 2026 jbsky.
+The software shipped in the three images keeps its own license: **Squid and
+ClamAV are under GPL-2.0-or-later**, **c-icap under LGPL-2.1-or-later**. The
+two never mix: each `init` is a separate program that executes its service
+without being linked to it and without reusing its code.
 
-Le logiciel embarque dans les trois images garde le sien : **Squid et ClamAV
-sont sous GPL-2.0-or-later**, **c-icap sous LGPL-2.1-or-later**. Les deux plans
-ne se melangent pas -- chaque `init` est un programme distinct, qui execute son
-service sans lui etre lie et sans en reprendre de code.
-
-Contributions : voir [`CONTRIBUTING.md`](CONTRIBUTING.md), un `Signed-off-by`
-est demande.
+Contributions: see [`CONTRIBUTING.md`](CONTRIBUTING.md); a `Signed-off-by` is
+required.
