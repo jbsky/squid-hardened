@@ -322,4 +322,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
 
 ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/init"]
 CMD ["clamd", "--foreground=true", "--config-file=/etc/clamav/clamd.conf"]
-# cve-rebuild 2026-11-21 CVE-2026-86144 -- paquets Alpine corriges, pris par apk upgrade du stage prep (cve-watch run 44909928844)
+# cve-rebuild 2026-11-27 CVE-2026-11979, CVE-2026-86138, CVE-2026-86139, CVE-2026-86140, CVE-2026-86142, CVE-2026-86143 -- paquets Alpine corriges, pris par apk upgrade du stage prep (cve-watch run 46025253452)
